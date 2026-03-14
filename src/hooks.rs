@@ -176,9 +176,24 @@ _suvadu_search_widget() {
         return
     fi
 
+    # Invalidate ZLE display before handing control to the TUI.
+    # Required for compatibility with Powerlevel10k instant prompt and other
+    # prompt frameworks that cache terminal state.
+    zle -I
+
+    # Save terminal state so we can restore it after the TUI exits.
+    # Some terminal/prompt combinations (e.g. iTerm2 + p10k) leave stty in
+    # a bad state after a full-screen TUI, causing the buffer to appear as
+    # dead text rather than being placed in the readline buffer.
+    local stty_state
+    stty_state=$(stty -g 2>/dev/null)
+
     # If suvadu is disabled (exit code 10), fallback to default search
     selected=$($_SUVADU_BIN search --query "$BUFFER" < "$tty_dev")
     local ret=$?
+
+    # Restore terminal state
+    [[ -n "$stty_state" ]] && stty "$stty_state" 2>/dev/null
 
     if [ $ret -eq 10 ]; then
         zle .history-incremental-search-backward
@@ -189,7 +204,12 @@ _suvadu_search_widget() {
         BUFFER="$selected"
         CURSOR=$#BUFFER
     fi
-    zle reset-prompt
+
+    # Guard against prompt redraw racing with queued keystrokes — a known
+    # source of visual corruption with p10k instant prompt.
+    if [[ ${KEYS_QUEUED_COUNT:-0} -eq 0 ]]; then
+        zle reset-prompt
+    fi
 }
 
 # Up Arrow Widget (Native Cycling)
