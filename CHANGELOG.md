@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-03-16
+
+### Fixed
+- **Powerlevel10k compatibility** — Ctrl+R search now works correctly with p10k instant prompt. Added ZLE display invalidation, terminal state save/restore, and queued-keystrokes guard. Fixes #6.
+
+### Added
+- **Update UX** — `suv update` now checks version before downloading, shows release notes, and displays an ASCII banner on success.
+
 ## [0.1.2] - 2026-03-13
 
 ### Fixed
