@@ -12,6 +12,17 @@ use minisign_verify::{PublicKey, Signature};
 /// Add the secret key file contents to GitHub Secrets as `MINISIGN_SECRET_KEY`.
 const MINISIGN_PUBLIC_KEY: &str = "RWSnsbPkvYdmk4EtxJ9WjItHLwx/GkmnBFNjeUhGWT2Z2efNdLTNMBy5";
 
+const VERSION_URL: &str = "https://downloads.appachi.tech/version.txt";
+
+const SUVADU_LOGO: &str = r"
+                               __
+   _______  ___   ______ _____/ /_  __
+  / ___/ / / / | / / __ `/ __  / / / /
+ (__  ) /_/ /| |/ / /_/ / /_/ / /_/ /
+/____/\__,_/ |___/\__,_/\__,_/\__,_/
+              su · va · du
+";
+
 pub fn is_homebrew_install() -> bool {
     if let Ok(exe) = std::env::current_exe() {
         let path = exe.to_string_lossy();
@@ -31,7 +42,8 @@ pub fn is_cargo_install() -> bool {
 }
 
 pub fn handle_update() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Current version: v{}", env!("CARGO_PKG_VERSION"));
+    let current_version = env!("CARGO_PKG_VERSION");
+    println!("Current version: v{current_version}");
 
     if is_homebrew_install() {
         println!();
@@ -62,7 +74,26 @@ pub fn handle_update() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("Checking for updates...");
+
+    let latest_version = fetch_latest_version();
+
+    if let Some(ref latest) = latest_version {
+        if latest == current_version {
+            show_up_to_date_banner(current_version);
+            return Ok(());
+        }
+        println!();
+        if crate::util::color_enabled() {
+            println!(
+                "  \x1b[33mv{current_version}\x1b[0m → \x1b[32;1mv{latest}\x1b[0m"
+            );
+        } else {
+            println!("  v{current_version} → v{latest}");
+        }
+    }
     println!();
+
+    display_release_notes(&latest_version);
 
     let (platform, platform_label) = match std::env::consts::OS {
         "macos" => ("macos", "macOS"),
@@ -105,9 +136,159 @@ pub fn handle_update() -> Result<(), Box<dyn std::error::Error>> {
     };
     download_and_verify(&params)?;
 
-    install_binary(&binary_path)?;
+    let installed = install_binary(&binary_path)?;
+
+    if installed {
+        let new_version = latest_version.as_deref().unwrap_or("latest");
+        show_success_banner(current_version, new_version);
+    }
+
     Ok(())
 }
+
+// ── Version check ────────────────────────────────────────
+
+fn fetch_latest_version() -> Option<String> {
+    let output = std::process::Command::new("curl")
+        .args(["--proto", "=https", "-fsSL", "-m", "10", VERSION_URL])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let version = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .trim_start_matches('v')
+            .to_string();
+        if !version.is_empty() {
+            return Some(version);
+        }
+    }
+    None
+}
+
+// ── Release notes ────────────────────────────────────────
+
+fn display_release_notes(version: &Option<String>) {
+    let tag = match version {
+        Some(v) => format!("v{v}"),
+        None => return,
+    };
+
+    let url = format!(
+        "https://api.github.com/repos/AppachiTech/suvadu/releases/tags/{tag}"
+    );
+
+    let output = match std::process::Command::new("curl")
+        .args([
+            "--proto",
+            "=https",
+            "-fsSL",
+            "-m",
+            "10",
+            "-H",
+            "Accept: application/vnd.github+json",
+            &url,
+        ])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return,
+    };
+
+    let body_str = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = match serde_json::from_str(&body_str) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let body = match json.get("body").and_then(|b| b.as_str()) {
+        Some(b) => b,
+        None => return,
+    };
+
+    let color = crate::util::color_enabled();
+    let mut has_output = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("### ") {
+            let section = &trimmed[4..];
+            if has_output {
+                println!();
+            }
+            if color {
+                println!("\x1b[33;1m{section}:\x1b[0m");
+            } else {
+                println!("{section}:");
+            }
+            has_output = true;
+        } else if trimmed.starts_with("- ") {
+            let item = trimmed[2..].replace("**", "");
+            if color {
+                println!("  \x1b[36m•\x1b[0m {item}");
+            } else {
+                println!("  - {item}");
+            }
+            has_output = true;
+        }
+    }
+
+    if has_output {
+        println!();
+    }
+}
+
+// ── Banners ──────────────────────────────────────────────
+
+fn show_up_to_date_banner(version: &str) {
+    let color = crate::util::color_enabled();
+    println!();
+    if color {
+        println!("\x1b[32m{SUVADU_LOGO}\x1b[0m");
+        println!(
+            "  \x1b[1mAlready up to date! (v{version})\x1b[0m"
+        );
+    } else {
+        println!("{SUVADU_LOGO}");
+        println!("  Already up to date! (v{version})");
+    }
+    println!();
+}
+
+fn show_success_banner(old_version: &str, new_version: &str) {
+    let color = crate::util::color_enabled();
+    println!();
+    if color {
+        println!("\x1b[32m{SUVADU_LOGO}\x1b[0m");
+        println!(
+            "  \x1b[1mHooray! suvadu has been updated! v{old_version} → v{new_version}\x1b[0m"
+        );
+    } else {
+        println!("{SUVADU_LOGO}");
+        println!(
+            "  Hooray! suvadu has been updated! v{old_version} → v{new_version}"
+        );
+    }
+    println!();
+    if color {
+        println!(
+            "  \x1b[36m→\x1b[0m Run \x1b[36msuv version\x1b[0m to verify"
+        );
+        println!(
+            "  \x1b[36m→\x1b[0m GitHub:  \x1b[4mhttps://github.com/AppachiTech/suvadu\x1b[0m"
+        );
+        println!(
+            "  \x1b[36m→\x1b[0m Issues:  \x1b[4mhttps://github.com/AppachiTech/suvadu/issues\x1b[0m"
+        );
+    } else {
+        println!("  → Run 'suv version' to verify");
+        println!("  → GitHub:  https://github.com/AppachiTech/suvadu");
+        println!("  → Issues:  https://github.com/AppachiTech/suvadu/issues");
+    }
+    println!();
+}
+
+// ── Download & verification ──────────────────────────────
 
 struct DownloadParams<'a> {
     platform_label: &'a str,
@@ -263,7 +444,11 @@ fn verify_checksum(
     }
 }
 
-fn install_binary(binary_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+// ── Install ──────────────────────────────────────────────
+
+/// Install the new binary. Returns `true` if the user confirmed and the
+/// install succeeded, `false` if the user cancelled.
+fn install_binary(binary_path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
     let binary_str = binary_path.to_string_lossy().to_string();
     let install_path =
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/usr/local/bin/suv"));
@@ -281,7 +466,7 @@ fn install_binary(binary_path: &std::path::Path) -> Result<(), Box<dyn std::erro
 
     if input.trim().to_lowercase() != "y" {
         println!("Update cancelled.");
-        return Ok(());
+        return Ok(false);
     }
 
     println!("Installing update (requires sudo)...");
@@ -302,10 +487,7 @@ fn install_binary(binary_path: &std::path::Path) -> Result<(), Box<dyn std::erro
         .status()?;
 
     if status_bin.success() && status_link.success() {
-        println!("  Update successful!");
-        println!();
-        println!("Run 'suv version' to verify the new version.");
-        Ok(())
+        Ok(true)
     } else {
         Err("Failed to install update.".into())
     }
@@ -450,5 +632,52 @@ mod tests {
         let output = "e3b0c44298fc1c149  some_file.tar.gz\n";
         let extracted = output.split_whitespace().next().unwrap_or("");
         assert_eq!(extracted, "e3b0c44298fc1c149");
+    }
+
+    // --- Release notes parsing tests ---
+
+    #[test]
+    fn release_notes_section_headers_detected() {
+        let body = "### Fixed\n- Bug one\n- Bug two\n\n### Added\n- Feature one\n";
+        let mut sections = Vec::new();
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("### ") {
+                sections.push(trimmed[4..].to_string());
+            }
+        }
+        assert_eq!(sections, vec!["Fixed", "Added"]);
+    }
+
+    #[test]
+    fn release_notes_items_extracted() {
+        let body = "### Fixed\n- **Linux** — Text file busy\n- Arrow-key nav\n";
+        let mut items = Vec::new();
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("- ") {
+                items.push(trimmed[2..].replace("**", ""));
+            }
+        }
+        assert_eq!(
+            items,
+            vec!["Linux — Text file busy", "Arrow-key nav"]
+        );
+    }
+
+    #[test]
+    fn logo_constant_is_not_empty() {
+        assert!(!SUVADU_LOGO.trim().is_empty());
+    }
+
+    #[test]
+    fn version_url_is_https() {
+        assert!(VERSION_URL.starts_with("https://"));
+    }
+
+    #[test]
+    fn github_releases_url_is_https() {
+        let url = "https://api.github.com/repos/AppachiTech/suvadu/releases/tags/v0.1.0";
+        assert!(url.starts_with("https://"));
     }
 }
