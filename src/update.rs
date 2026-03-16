@@ -84,16 +84,14 @@ pub fn handle_update() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!();
         if crate::util::color_enabled() {
-            println!(
-                "  \x1b[33mv{current_version}\x1b[0m → \x1b[32;1mv{latest}\x1b[0m"
-            );
+            println!("  \x1b[33mv{current_version}\x1b[0m → \x1b[32;1mv{latest}\x1b[0m");
         } else {
             println!("  v{current_version} → v{latest}");
         }
     }
     println!();
 
-    display_release_notes(&latest_version);
+    display_release_notes(latest_version.as_deref());
 
     let (platform, platform_label) = match std::env::consts::OS {
         "macos" => ("macos", "macOS"),
@@ -168,15 +166,11 @@ fn fetch_latest_version() -> Option<String> {
 
 // ── Release notes ────────────────────────────────────────
 
-fn display_release_notes(version: &Option<String>) {
-    let tag = match version {
-        Some(v) => format!("v{v}"),
-        None => return,
-    };
+fn display_release_notes(version: Option<&str>) {
+    let Some(v) = version else { return };
+    let tag = format!("v{v}");
 
-    let url = format!(
-        "https://api.github.com/repos/AppachiTech/suvadu/releases/tags/{tag}"
-    );
+    let url = format!("https://api.github.com/repos/AppachiTech/suvadu/releases/tags/{tag}");
 
     let output = match std::process::Command::new("curl")
         .args([
@@ -201,9 +195,8 @@ fn display_release_notes(version: &Option<String>) {
         Err(_) => return,
     };
 
-    let body = match json.get("body").and_then(|b| b.as_str()) {
-        Some(b) => b,
-        None => return,
+    let Some(body) = json.get("body").and_then(|b| b.as_str()) else {
+        return;
     };
 
     let color = crate::util::color_enabled();
@@ -211,8 +204,7 @@ fn display_release_notes(version: &Option<String>) {
 
     for line in body.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("### ") {
-            let section = &trimmed[4..];
+        if let Some(section) = trimmed.strip_prefix("### ") {
             if has_output {
                 println!();
             }
@@ -222,8 +214,8 @@ fn display_release_notes(version: &Option<String>) {
                 println!("{section}:");
             }
             has_output = true;
-        } else if trimmed.starts_with("- ") {
-            let item = trimmed[2..].replace("**", "");
+        } else if let Some(rest) = trimmed.strip_prefix("- ") {
+            let item = rest.replace("**", "");
             if color {
                 println!("  \x1b[36m•\x1b[0m {item}");
             } else {
@@ -245,9 +237,7 @@ fn show_up_to_date_banner(version: &str) {
     println!();
     if color {
         println!("\x1b[32m{SUVADU_LOGO}\x1b[0m");
-        println!(
-            "  \x1b[1mAlready up to date! (v{version})\x1b[0m"
-        );
+        println!("  \x1b[1mAlready up to date! (v{version})\x1b[0m");
     } else {
         println!("{SUVADU_LOGO}");
         println!("  Already up to date! (v{version})");
@@ -265,18 +255,12 @@ fn show_success_banner(old_version: &str, new_version: &str) {
         );
     } else {
         println!("{SUVADU_LOGO}");
-        println!(
-            "  Hooray! suvadu has been updated! v{old_version} → v{new_version}"
-        );
+        println!("  Hooray! suvadu has been updated! v{old_version} → v{new_version}");
     }
     println!();
     if color {
-        println!(
-            "  \x1b[36m→\x1b[0m Run \x1b[36msuv version\x1b[0m to verify"
-        );
-        println!(
-            "  \x1b[36m→\x1b[0m GitHub:  \x1b[4mhttps://github.com/AppachiTech/suvadu\x1b[0m"
-        );
+        println!("  \x1b[36m→\x1b[0m Run \x1b[36msuv version\x1b[0m to verify");
+        println!("  \x1b[36m→\x1b[0m GitHub:  \x1b[4mhttps://github.com/AppachiTech/suvadu\x1b[0m");
         println!(
             "  \x1b[36m→\x1b[0m Issues:  \x1b[4mhttps://github.com/AppachiTech/suvadu/issues\x1b[0m"
         );
@@ -642,8 +626,8 @@ mod tests {
         let mut sections = Vec::new();
         for line in body.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("### ") {
-                sections.push(trimmed[4..].to_string());
+            if let Some(section) = trimmed.strip_prefix("### ") {
+                sections.push(section.to_string());
             }
         }
         assert_eq!(sections, vec!["Fixed", "Added"]);
@@ -655,14 +639,11 @@ mod tests {
         let mut items = Vec::new();
         for line in body.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("- ") {
-                items.push(trimmed[2..].replace("**", ""));
+            if let Some(rest) = trimmed.strip_prefix("- ") {
+                items.push(rest.replace("**", ""));
             }
         }
-        assert_eq!(
-            items,
-            vec!["Linux — Text file busy", "Arrow-key nav"]
-        );
+        assert_eq!(items, vec!["Linux — Text file busy", "Arrow-key nav"]);
     }
 
     #[test]

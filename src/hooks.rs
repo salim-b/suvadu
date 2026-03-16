@@ -159,6 +159,7 @@ add-zsh-hook precmd _suvadu_precmd
 
 /// Zsh interactive search widget and arrow-key cycling widgets, plus widget
 /// registration and the Ctrl+R binding.
+#[allow(clippy::literal_string_with_formatting_args)]
 const fn zsh_widgets_script() -> &'static str {
     r#"# Interactive Search Widget
 _suvadu_search_widget() {
