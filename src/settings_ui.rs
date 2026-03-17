@@ -1,4 +1,4 @@
-use crate::config::{save_config, Config};
+use crate::config::{save_config, Config, CustomAgent};
 use crate::theme::theme;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
@@ -10,6 +10,8 @@ use ratatui::{
     Terminal,
 };
 use std::io;
+
+const EXECUTOR_TYPES: &[&str] = &["agent", "ide", "ci"];
 
 #[derive(Debug, PartialEq)]
 enum InputMode {
@@ -24,10 +26,17 @@ enum SettingsTab {
     Shell,
     Exclusions,
     AutoTags,
+    Agents,
 }
 
 impl SettingsTab {
-    const ALL: &[Self] = &[Self::Search, Self::Shell, Self::Exclusions, Self::AutoTags];
+    const ALL: &[Self] = &[
+        Self::Search,
+        Self::Shell,
+        Self::Exclusions,
+        Self::AutoTags,
+        Self::Agents,
+    ];
 
     const fn index(self) -> usize {
         match self {
@@ -35,6 +44,7 @@ impl SettingsTab {
             Self::Shell => 1,
             Self::Exclusions => 2,
             Self::AutoTags => 3,
+            Self::Agents => 4,
         }
     }
 
@@ -44,6 +54,7 @@ impl SettingsTab {
             Self::Shell => 3,
             Self::Exclusions => config.exclusions.len(),
             Self::AutoTags => config.auto_tags.len(),
+            Self::Agents => config.agents.len(),
         }
     }
 
@@ -52,16 +63,18 @@ impl SettingsTab {
             Self::Search => Self::Shell,
             Self::Shell => Self::Exclusions,
             Self::Exclusions => Self::AutoTags,
-            Self::AutoTags => Self::Search,
+            Self::AutoTags => Self::Agents,
+            Self::Agents => Self::Search,
         }
     }
 
     const fn prev(self) -> Self {
         match self {
-            Self::Search => Self::AutoTags,
+            Self::Search => Self::Agents,
             Self::Shell => Self::Search,
             Self::Exclusions => Self::Shell,
             Self::AutoTags => Self::Exclusions,
+            Self::Agents => Self::AutoTags,
         }
     }
 
@@ -71,6 +84,7 @@ impl SettingsTab {
             Self::Shell => "Shell",
             Self::Exclusions => "Exclusions",
             Self::AutoTags => "Auto Tags",
+            Self::Agents => "Agents",
         }
     }
 }
@@ -85,8 +99,14 @@ struct AppState {
     auto_tag_path_input: String,
     auto_tag_name_input: String,
     auto_tag_focus: usize, // 0 = path, 1 = name
+    // Agent multi-field form
+    agent_name_input: String,
+    agent_env_var_input: String,
+    agent_executor_type_index: usize, // index into EXECUTOR_TYPES
+    agent_focus: usize,               // 0 = name, 1 = env_var, 2 = executor_type
     exclusion_list_state: ListState,
     auto_tag_list_state: ListState,
+    agent_list_state: ListState,
     save_status: Option<String>,
     dirty: bool,
 }
@@ -102,8 +122,13 @@ impl AppState {
             auto_tag_path_input: String::new(),
             auto_tag_name_input: String::new(),
             auto_tag_focus: 0,
+            agent_name_input: String::new(),
+            agent_env_var_input: String::new(),
+            agent_executor_type_index: 0,
+            agent_focus: 0,
             exclusion_list_state: ListState::default(),
             auto_tag_list_state: ListState::default(),
+            agent_list_state: ListState::default(),
             save_status: None,
             dirty: false,
         }
@@ -125,6 +150,7 @@ impl AppState {
     const fn reset_list_states(&mut self) {
         self.exclusion_list_state.select(None);
         self.auto_tag_list_state.select(None);
+        self.agent_list_state.select(None);
     }
 
     fn next_item(&mut self) {
@@ -138,6 +164,9 @@ impl AppState {
                 }
                 SettingsTab::AutoTags => {
                     self.auto_tag_list_state.select(Some(self.selected_item));
+                }
+                SettingsTab::Agents => {
+                    self.agent_list_state.select(Some(self.selected_item));
                 }
                 _ => {}
             }
@@ -159,6 +188,9 @@ impl AppState {
                 }
                 SettingsTab::AutoTags => {
                     self.auto_tag_list_state.select(Some(self.selected_item));
+                }
+                SettingsTab::Agents => {
+                    self.agent_list_state.select(Some(self.selected_item));
                 }
                 _ => {}
             }
@@ -231,6 +263,7 @@ impl AppState {
         true
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_normal_input(&mut self, key: event::KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
@@ -261,6 +294,13 @@ impl AppState {
                 self.auto_tag_path_input.clear();
                 self.auto_tag_name_input.clear();
                 self.auto_tag_focus = 0;
+            }
+            KeyCode::Char('a') if self.current_tab == SettingsTab::Agents => {
+                self.input_mode = InputMode::Editing;
+                self.agent_name_input.clear();
+                self.agent_env_var_input.clear();
+                self.agent_executor_type_index = 0;
+                self.agent_focus = 0;
             }
             KeyCode::Char('d') if self.current_tab == SettingsTab::Exclusions => {
                 if !self.config.exclusions.is_empty() {
@@ -305,6 +345,29 @@ impl AppState {
                         });
                 }
             }
+            KeyCode::Char('d') if self.current_tab == SettingsTab::Agents => {
+                if !self.config.agents.is_empty() {
+                    self.dirty = true;
+                    let mut agent_keys: Vec<_> = self.config.agents.keys().cloned().collect();
+                    agent_keys.sort();
+                    if let Some(key) = agent_keys.get(self.selected_item) {
+                        self.config.agents.remove(key);
+                    }
+                    if self.selected_item >= self.config.agents.len()
+                        && !self.config.agents.is_empty()
+                    {
+                        self.selected_item = self.config.agents.len() - 1;
+                    } else if self.config.agents.is_empty() {
+                        self.selected_item = 0;
+                    }
+                    self.agent_list_state
+                        .select(if self.config.agents.is_empty() {
+                            None
+                        } else {
+                            Some(self.selected_item)
+                        });
+                }
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 // Enter/Space toggles bools or enters edit mode for numbers/text
                 match (self.current_tab, self.selected_item) {
@@ -321,6 +384,7 @@ impl AppState {
         true
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_editing_input(&mut self, key: event::KeyEvent) {
         match key.code {
             KeyCode::Enter => {
@@ -379,6 +443,46 @@ impl AppState {
                             self.save_status = Some("Both Path and Tag are required".to_string());
                         }
                     }
+                } else if self.current_tab == SettingsTab::Agents {
+                    // Agent triple-field form
+                    if self.agent_focus == 0 {
+                        self.agent_focus = 1;
+                    } else if self.agent_focus == 1 {
+                        self.agent_focus = 2;
+                    } else {
+                        // Submit
+                        let name = self.agent_name_input.trim().to_string();
+                        let env_var = self.agent_env_var_input.trim().to_string();
+                        if name.is_empty() || env_var.is_empty() {
+                            self.save_status = Some("Name and Env Var are required".to_string());
+                        } else if !name
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                        {
+                            self.save_status = Some(
+                                "Name must be alphanumeric, hyphens, or underscores".to_string(),
+                            );
+                        } else {
+                            let executor_type =
+                                EXECUTOR_TYPES[self.agent_executor_type_index].to_string();
+                            self.config.agents.insert(
+                                name.clone(),
+                                CustomAgent {
+                                    env_var,
+                                    executor_type,
+                                },
+                            );
+                            self.dirty = true;
+                            self.save_status = Some(format!("Added agent: {name}"));
+                            let mut sorted_keys: Vec<_> =
+                                self.config.agents.keys().cloned().collect();
+                            sorted_keys.sort();
+                            self.selected_item =
+                                sorted_keys.iter().position(|k| k == &name).unwrap_or(0);
+                            self.agent_list_state.select(Some(self.selected_item));
+                            self.input_mode = InputMode::Normal;
+                        }
+                    }
                 } else {
                     self.input_mode = InputMode::Normal;
                 }
@@ -390,6 +494,10 @@ impl AppState {
                 // Toggle focus between path and tag
                 self.auto_tag_focus = 1 - self.auto_tag_focus;
             }
+            KeyCode::Tab if self.current_tab == SettingsTab::Agents => {
+                // Cycle focus: name -> env_var -> executor_type -> name
+                self.agent_focus = (self.agent_focus + 1) % 3;
+            }
             KeyCode::Char(c) => {
                 const MAX_SETTINGS_INPUT: usize = 500;
                 if self.current_tab == SettingsTab::AutoTags {
@@ -399,6 +507,20 @@ impl AppState {
                         }
                     } else if self.auto_tag_name_input.len() < MAX_SETTINGS_INPUT {
                         self.auto_tag_name_input.push(c);
+                    }
+                } else if self.current_tab == SettingsTab::Agents {
+                    if self.agent_focus == 0 {
+                        if self.agent_name_input.len() < MAX_SETTINGS_INPUT {
+                            self.agent_name_input.push(c);
+                        }
+                    } else if self.agent_focus == 1 {
+                        if self.agent_env_var_input.len() < MAX_SETTINGS_INPUT {
+                            self.agent_env_var_input.push(c);
+                        }
+                    } else {
+                        // Executor type is a selector — any key cycles
+                        self.agent_executor_type_index =
+                            (self.agent_executor_type_index + 1) % EXECUTOR_TYPES.len();
                     }
                 } else if self.input_buffer.len() < MAX_SETTINGS_INPUT {
                     self.input_buffer.push(c);
@@ -411,6 +533,13 @@ impl AppState {
                     } else {
                         self.auto_tag_name_input.pop();
                     }
+                } else if self.current_tab == SettingsTab::Agents {
+                    if self.agent_focus == 0 {
+                        self.agent_name_input.pop();
+                    } else if self.agent_focus == 1 {
+                        self.agent_env_var_input.pop();
+                    }
+                    // focus == 2: executor_type is a selector, no backspace
                 } else {
                     self.input_buffer.pop();
                 }
@@ -519,7 +648,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut AppState) {
     if app.input_mode == InputMode::Normal
         && matches!(
             app.current_tab,
-            SettingsTab::Exclusions | SettingsTab::AutoTags
+            SettingsTab::Exclusions | SettingsTab::AutoTags | SettingsTab::Agents
         )
     {
         help_badges.push(Span::styled(" a ", badge_key));
@@ -551,6 +680,8 @@ fn ui(f: &mut ratatui::Frame, app: &mut AppState) {
     if app.input_mode == InputMode::Editing {
         if app.current_tab == SettingsTab::AutoTags {
             render_auto_tag_popup(f, app);
+        } else if app.current_tab == SettingsTab::Agents {
+            render_agent_popup(f, app);
         } else {
             render_input_popup(f, &app.input_buffer);
         }
@@ -632,6 +763,7 @@ fn render_content_panel(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) 
         SettingsTab::Shell => render_shell_tab(f, app, content_chunks[0]),
         SettingsTab::Exclusions => render_exclusions_tab(f, app, content_chunks[0]),
         SettingsTab::AutoTags => render_auto_tags_tab(f, app, content_chunks[0]),
+        SettingsTab::Agents => render_agents_tab(f, app, content_chunks[0]),
     }
 
     // Render description pane
@@ -660,6 +792,7 @@ const fn get_setting_description(tab: usize, item: usize) -> &'static str {
         (1, 0) => "Bind Up/Down arrow keys to cycle through command history",
         (1, 1) => "Show risk assessment badges in the search detail pane for agent commands",
         (1, 2) => "Color theme: dark (RGB for dark terminals), light (RGB for light terminals), terminal (ANSI 16 — adapts to your scheme). Changes apply immediately.",
+        (4, _) => "Custom agent detection rules. When an env var is set, suvadu tags commands with that agent name and type. Custom agents are checked before built-in agents. Restart your shell (source ~/.zshrc) after adding or removing agents.",
         _ => "Use [a] to add new items, [d] to delete selected items",
     }
 }
@@ -744,10 +877,6 @@ fn render_shell_tab(f: &mut ratatui::Frame, app: &AppState, area: Rect) {
 
 fn render_exclusions_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) {
     let t = theme();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(4)].as_ref())
-        .split(area);
 
     if app.config.exclusions.is_empty() {
         let text = Paragraph::new(
@@ -762,7 +891,7 @@ fn render_exclusions_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect)
                 .border_style(Style::default().fg(t.border))
                 .title(" Exclusions "),
         );
-        f.render_widget(text, chunks[0]);
+        f.render_widget(text, area);
     } else {
         let items: Vec<ListItem> = app
             .config
@@ -791,23 +920,12 @@ fn render_exclusions_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect)
             app.exclusion_list_state.select(Some(0));
         }
 
-        f.render_stateful_widget(list, chunks[0], &mut app.exclusion_list_state);
+        f.render_stateful_widget(list, area, &mut app.exclusion_list_state);
     }
-
-    let description = Paragraph::new(
-        "Automatically ignore commands matching these patterns. Useful for secrets or noise.",
-    )
-    .wrap(Wrap { trim: true })
-    .style(Style::default().fg(t.text_muted));
-    f.render_widget(description, chunks[1]);
 }
 
 fn render_auto_tags_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) {
     let t = theme();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(4)].as_ref())
-        .split(area);
 
     if app.config.auto_tags.is_empty() {
         let text = Paragraph::new(
@@ -822,7 +940,7 @@ fn render_auto_tags_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) 
                 .border_style(Style::default().fg(t.border))
                 .title(" Auto Tags "),
         );
-        f.render_widget(text, chunks[0]);
+        f.render_widget(text, area);
     } else {
         let mut auto_tags: Vec<_> = app.config.auto_tags.iter().collect();
         auto_tags.sort_by_key(|&(k, _)| k);
@@ -852,15 +970,8 @@ fn render_auto_tags_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) 
             app.auto_tag_list_state.select(Some(0));
         }
 
-        f.render_stateful_widget(list, chunks[0], &mut app.auto_tag_list_state);
+        f.render_stateful_widget(list, area, &mut app.auto_tag_list_state);
     }
-
-    let description = Paragraph::new(
-        "Automatically assign a tag to any command executed inside these directories. Useful for separating Work vs Personal context."
-    )
-    .wrap(Wrap { trim: true })
-    .style(Style::default().fg(t.text_muted));
-    f.render_widget(description, chunks[1]);
 }
 
 fn render_auto_tag_popup(f: &mut ratatui::Frame, app: &AppState) {
@@ -943,6 +1054,172 @@ fn render_auto_tag_popup(f: &mut ratatui::Frame, app: &AppState) {
     f.render_widget(help, chunks[2]);
 }
 
+fn render_agents_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) {
+    let t = theme();
+
+    if app.config.agents.is_empty() {
+        let text = Paragraph::new(
+            "No custom agents defined.\nPress 'a' to add a detection rule.\n\nWhen an environment variable is present, suvadu\nwill tag commands with the agent name and type.\nRestart your shell after adding agents.\n\nExample: your-agent \u{2014} YOUR_AGENT_ENV_VAR (agent)",
+        )
+        .wrap(Wrap { trim: true })
+        .style(Style::default().fg(t.text_secondary))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(t.border))
+                .title(" Agents "),
+        );
+        f.render_widget(text, area);
+    } else {
+        let mut agents: Vec<_> = app.config.agents.iter().collect();
+        agents.sort_by_key(|&(k, _)| k);
+
+        let items: Vec<ListItem> = agents
+            .iter()
+            .map(|(name, agent)| {
+                ListItem::new(format!(
+                    "  {} \u{2014} {} ({})",
+                    name, agent.env_var, agent.executor_type
+                ))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(t.border))
+                    .title(" Agents (Name \u{2014} Env Var (Type)) "),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(t.selection_bg)
+                    .fg(t.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" > ");
+
+        if app.agent_list_state.selected().is_none() && !app.config.agents.is_empty() {
+            app.agent_list_state.select(Some(0));
+        }
+
+        f.render_stateful_widget(list, area, &mut app.agent_list_state);
+    }
+}
+
+fn render_agent_popup(f: &mut ratatui::Frame, app: &AppState) {
+    let t = theme();
+    let area = centered_rect(60, 40, f.area());
+    let block = Block::default()
+        .title(" Add Agent ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(t.primary))
+        .style(Style::default().bg(t.bg_elevated));
+
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints(
+            [
+                Constraint::Length(3), // Name field
+                Constraint::Length(3), // Env Var field
+                Constraint::Length(3), // Executor Type selector
+                Constraint::Min(0),    // Help text
+            ]
+            .as_ref(),
+        )
+        .split(area);
+
+    // Field 0: Name
+    let name_border = if app.agent_focus == 0 {
+        t.border_focus
+    } else {
+        t.border
+    };
+    let name_text = if app.agent_focus == 0 {
+        t.text
+    } else {
+        t.text_secondary
+    };
+    let name_input = Paragraph::new(app.agent_name_input.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(name_border))
+                .title(format!(
+                    "Name (e.g., my-agent){}",
+                    if app.agent_focus == 0 { " *" } else { "" }
+                )),
+        )
+        .style(Style::default().fg(name_text));
+    f.render_widget(name_input, chunks[0]);
+
+    // Field 1: Env Var
+    let env_border = if app.agent_focus == 1 {
+        t.border_focus
+    } else {
+        t.border
+    };
+    let env_text = if app.agent_focus == 1 {
+        t.text
+    } else {
+        t.text_secondary
+    };
+    let env_input = Paragraph::new(app.agent_env_var_input.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(env_border))
+                .title(format!(
+                    "Env Var (e.g., MY_AGENT_ENV){}",
+                    if app.agent_focus == 1 { " *" } else { "" }
+                )),
+        )
+        .style(Style::default().fg(env_text));
+    f.render_widget(env_input, chunks[1]);
+
+    // Field 2: Executor Type (cycle selector)
+    let exec_border = if app.agent_focus == 2 {
+        t.border_focus
+    } else {
+        t.border
+    };
+    let exec_text = if app.agent_focus == 2 {
+        t.text
+    } else {
+        t.text_secondary
+    };
+    let exec_display = format!("< {} >", EXECUTOR_TYPES[app.agent_executor_type_index]);
+    let exec_input = Paragraph::new(exec_display)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(exec_border))
+                .title(format!(
+                    "Executor Type{}",
+                    if app.agent_focus == 2 { " *" } else { "" }
+                )),
+        )
+        .style(Style::default().fg(exec_text));
+    f.render_widget(exec_input, chunks[2]);
+
+    let help = Paragraph::new(
+        "Tab: switch fields  |  Enter: next/submit  |  Type: cycle type  |  Esc: cancel",
+    )
+    .style(Style::default().fg(t.text_muted))
+    .alignment(ratatui::layout::Alignment::Center);
+    f.render_widget(help, chunks[3]);
+}
+
 fn render_input_popup(f: &mut ratatui::Frame, input: &str) {
     let t = theme();
     let area = centered_rect(60, 20, f.area());
@@ -983,6 +1260,8 @@ mod tests {
         assert_eq!(app.current_tab, SettingsTab::Exclusions);
         app.next_tab();
         assert_eq!(app.current_tab, SettingsTab::AutoTags);
+        app.next_tab();
+        assert_eq!(app.current_tab, SettingsTab::Agents);
         app.next_tab();
         assert_eq!(app.current_tab, SettingsTab::Search); // Cycle back
 
@@ -1069,6 +1348,9 @@ mod tests {
         let mut app = AppState::new(config);
 
         // From Search, prev_tab wraps to last tab
+        app.prev_tab();
+        assert_eq!(app.current_tab, SettingsTab::Agents);
+
         app.prev_tab();
         assert_eq!(app.current_tab, SettingsTab::AutoTags);
         assert_eq!(app.selected_item, 0);
@@ -1876,5 +2158,245 @@ mod tests {
         app.next_item();
         assert_eq!(app.selected_item, 0);
         assert_eq!(app.auto_tag_list_state.selected(), Some(0));
+    }
+
+    // ── Agent tab tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_agent_add_flow() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        // Press 'a' to start adding
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert_eq!(app.agent_focus, 0);
+
+        // Type name "opencode"
+        for c in "opencode".chars() {
+            app.handle_input(KeyEvent::from(KeyCode::Char(c)));
+        }
+        assert_eq!(app.agent_name_input, "opencode");
+
+        // Enter to move to env_var
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.agent_focus, 1);
+
+        // Type env var
+        for c in "OPENCODE".chars() {
+            app.handle_input(KeyEvent::from(KeyCode::Char(c)));
+        }
+        assert_eq!(app.agent_env_var_input, "OPENCODE");
+
+        // Enter to move to executor type
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.agent_focus, 2);
+
+        // Default executor type is "agent" (index 0), submit
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.dirty);
+
+        let agent = app.config.agents.get("opencode").unwrap();
+        assert_eq!(agent.env_var, "OPENCODE");
+        assert_eq!(agent.executor_type, "agent");
+    }
+
+    #[test]
+    fn test_agent_delete_flow() {
+        let mut config = Config::default();
+        config.agents.insert(
+            "tool-a".to_string(),
+            CustomAgent {
+                env_var: "TOOL_A".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+        config.agents.insert(
+            "tool-b".to_string(),
+            CustomAgent {
+                env_var: "TOOL_B".to_string(),
+                executor_type: "ide".to_string(),
+            },
+        );
+
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+        app.selected_item = 0;
+
+        // Delete first (sorted: tool-a)
+        app.handle_input(KeyEvent::from(KeyCode::Char('d')));
+        assert!(app.dirty);
+        assert_eq!(app.config.agents.len(), 1);
+        assert!(app.config.agents.contains_key("tool-b"));
+
+        // Delete remaining
+        app.handle_input(KeyEvent::from(KeyCode::Char('d')));
+        assert!(app.config.agents.is_empty());
+        assert_eq!(app.selected_item, 0);
+    }
+
+    #[test]
+    fn test_agent_tab_toggles_focus() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+        assert_eq!(app.agent_focus, 0);
+
+        app.handle_input(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.agent_focus, 1);
+
+        app.handle_input(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.agent_focus, 2);
+
+        app.handle_input(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.agent_focus, 0); // wraps
+    }
+
+    #[test]
+    fn test_agent_empty_fields_rejected() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+
+        // Skip name, move to env_var, move to type, submit
+        app.handle_input(KeyEvent::from(KeyCode::Enter)); // focus 1
+        app.handle_input(KeyEvent::from(KeyCode::Enter)); // focus 2
+        app.handle_input(KeyEvent::from(KeyCode::Enter)); // submit
+
+        // Should still be in editing mode with error
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert!(app.save_status.as_ref().unwrap().contains("required"));
+        assert!(app.config.agents.is_empty());
+    }
+
+    #[test]
+    fn test_agent_name_validation() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+
+        // Type invalid name with spaces
+        for c in "bad name".chars() {
+            app.handle_input(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_input(KeyEvent::from(KeyCode::Enter)); // focus 1
+        for c in "VAR".chars() {
+            app.handle_input(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_input(KeyEvent::from(KeyCode::Enter)); // focus 2
+        app.handle_input(KeyEvent::from(KeyCode::Enter)); // submit
+
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert!(app.save_status.as_ref().unwrap().contains("alphanumeric"));
+        assert!(app.config.agents.is_empty());
+    }
+
+    #[test]
+    fn test_agent_executor_type_cycling() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+        // Move to executor type field
+        app.agent_focus = 2;
+
+        assert_eq!(app.agent_executor_type_index, 0); // "agent"
+
+        app.handle_input(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.agent_executor_type_index, 1); // "ide"
+
+        app.handle_input(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.agent_executor_type_index, 2); // "ci"
+
+        app.handle_input(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.agent_executor_type_index, 0); // wraps to "agent"
+    }
+
+    #[test]
+    fn test_agent_esc_cancels_add() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+        for c in "test".chars() {
+            app.handle_input(KeyEvent::from(KeyCode::Char(c)));
+        }
+
+        app.handle_input(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.config.agents.is_empty());
+        assert!(!app.dirty);
+    }
+
+    #[test]
+    fn test_agent_backspace() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+
+        // Type and backspace in name field
+        app.handle_input(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_input(KeyEvent::from(KeyCode::Char('b')));
+        assert_eq!(app.agent_name_input, "ab");
+        app.handle_input(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.agent_name_input, "a");
+
+        // Move to env_var and test backspace
+        app.agent_focus = 1;
+        app.handle_input(KeyEvent::from(KeyCode::Char('X')));
+        app.handle_input(KeyEvent::from(KeyCode::Char('Y')));
+        assert_eq!(app.agent_env_var_input, "XY");
+        app.handle_input(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.agent_env_var_input, "X");
+
+        // Backspace on executor_type (focus 2) is a no-op
+        app.agent_focus = 2;
+        let idx_before = app.agent_executor_type_index;
+        app.handle_input(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.agent_executor_type_index, idx_before);
+    }
+
+    #[test]
+    fn test_agent_item_navigation() {
+        let mut config = Config::default();
+        config.agents.insert(
+            "alpha".to_string(),
+            CustomAgent {
+                env_var: "A".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+        config.agents.insert(
+            "beta".to_string(),
+            CustomAgent {
+                env_var: "B".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Agents;
+        app.selected_item = 0;
+
+        app.next_item();
+        assert_eq!(app.selected_item, 1);
+        assert_eq!(app.agent_list_state.selected(), Some(1));
+
+        // Wraps
+        app.next_item();
+        assert_eq!(app.selected_item, 0);
+        assert_eq!(app.agent_list_state.selected(), Some(0));
     }
 }
