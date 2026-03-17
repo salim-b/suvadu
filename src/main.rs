@@ -189,6 +189,8 @@ fn run_add(cmd: Commands) -> Result<(), Box<dyn std::error::Error>> {
     else {
         unreachable!()
     };
+    // Read cached agent prompt if available (written by opencode/claude-code plugins)
+    let context = commands::entry::read_agent_prompt(&session_id);
     commands::entry::handle_add_with_context(commands::entry::AddParams {
         session_id,
         command,
@@ -198,7 +200,7 @@ fn run_add(cmd: Commands) -> Result<(), Box<dyn std::error::Error>> {
         ended_at,
         executor_type,
         executor,
-        context: None,
+        context,
     })
 }
 
@@ -290,6 +292,7 @@ fn run_init(target: cli::InitTarget) -> Result<(), Box<dyn std::error::Error>> {
             "Suvadu detects Antigravity via the $ANTIGRAVITY_AGENT\nenvironment variable.",
             "antigravity",
         ),
+        cli::InitTarget::Opencode => integrations::handle_init_opencode(),
     }
 }
 

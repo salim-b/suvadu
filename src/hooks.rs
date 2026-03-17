@@ -7,8 +7,14 @@ fn shell_quote_single(value: &str) -> String {
     format!("'{escaped}'")
 }
 
-/// Executor-detection shell function body, shared between zsh and bash hooks.
-const EXECUTOR_DETECTION_SCRIPT: &str = r#"# Detect executor type and name
+/// Generate executor-detection shell function, shared between zsh and bash hooks.
+/// Custom agents from config are injected between CI detection and the built-in
+/// agent/IDE detection so that user-defined rules take priority.
+fn executor_detection_script(config: &config::Config) -> String {
+    use std::fmt::Write;
+
+    let mut script = String::from(
+        r#"# Detect executor type and name
 __suvadu_detect_executor() {
     local executor_type="unknown"
     local executor="unknown"
@@ -25,7 +31,32 @@ __suvadu_detect_executor() {
         else
             executor="ci-unknown"
         fi
-    # AI Agent Detection
+"#,
+    );
+
+    // Inject custom agents from [agents] config, checked before built-in agents.
+    // Each custom agent is an elif block that checks a single env var.
+    let mut agents: Vec<_> = config.agents.iter().collect();
+    agents.sort_by_key(|(name, _)| (*name).clone());
+    for (name, agent) in &agents {
+        // Sanitize: only allow alphanumeric, hyphens, underscores in names and env vars
+        if !is_safe_shell_identifier(name) || !is_safe_shell_identifier(&agent.env_var) {
+            continue;
+        }
+        let exec_type = if is_safe_shell_identifier(&agent.executor_type) {
+            &agent.executor_type
+        } else {
+            "agent"
+        };
+        let _ = write!(
+            script,
+            "    elif [[ -n \"${0}\" ]]; then\n        executor_type=\"{exec_type}\"\n        executor=\"{name}\"\n",
+            agent.env_var
+        );
+    }
+
+    script.push_str(
+        r#"    # AI Agent Detection
     elif [[ -n "$CLAUDE_CODE" ]] || [[ "$TERM_PROGRAM" == "claude" ]]; then
         executor_type="agent"
         executor="claude-code"
@@ -72,7 +103,20 @@ __suvadu_detect_executor() {
 
     echo "$executor_type:$executor"
 }
-"#;
+"#,
+    );
+
+    script
+}
+
+/// Returns true if the string contains only safe characters for use in shell
+/// scripts (alphanumeric, hyphens, underscores).
+fn is_safe_shell_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 256
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
 
 /// Zsh-specific preamble, preexec/precmd hooks, and hook registration.
 ///
@@ -446,7 +490,7 @@ pub fn get_zsh_hook(config: &config::Config) -> Result<String, Box<dyn std::erro
     let bin_path = current_exe.to_string_lossy();
 
     let mut script = zsh_preexec_script(&bin_path);
-    script.push_str(EXECUTOR_DETECTION_SCRIPT);
+    script.push_str(&executor_detection_script(config));
     script.push_str(zsh_hook_functions());
     script.push_str(zsh_widgets_script());
 
@@ -473,13 +517,12 @@ pub fn get_bash_hook(config: &config::Config) -> Result<String, Box<dyn std::err
     let bin_path = current_exe.to_string_lossy();
 
     let mut script = bash_preexec_script(&bin_path);
-    script.push_str(EXECUTOR_DETECTION_SCRIPT);
+    script.push_str(&executor_detection_script(config));
     script.push_str(bash_hook_functions());
     script.push_str(bash_search_widget());
 
     // Note: Bash doesn't have zsh's zle widgets for arrow key override,
     // so arrow-based history navigation is not supported in Bash.
-    let _ = config; // Config reserved for future Bash-specific settings
 
     if let Some(aliases) = aliases_source_script() {
         script.push_str(&aliases);
@@ -678,6 +721,120 @@ mod tests {
         assert!(
             hook.contains("bindkey '^[OB' suvadu-down-arrow"),
             "Alternate arrow down binding should be present"
+        );
+    }
+
+    #[test]
+    fn test_custom_agents_in_zsh_hook() {
+        let mut config = config::Config::default();
+        config.agents.insert(
+            "opencode".to_string(),
+            config::CustomAgent {
+                env_var: "OPENCODE".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+        config.agents.insert(
+            "my-tool".to_string(),
+            config::CustomAgent {
+                env_var: "MY_TOOL_SESSION".to_string(),
+                executor_type: "ide".to_string(),
+            },
+        );
+
+        let hook = get_zsh_hook(&config).expect("Failed to generate zsh hook");
+
+        // Custom agents should appear in the detection script
+        assert!(hook.contains("OPENCODE"));
+        assert!(hook.contains("executor=\"opencode\""));
+        assert!(hook.contains("MY_TOOL_SESSION"));
+        assert!(hook.contains("executor=\"my-tool\""));
+        assert!(hook.contains("executor_type=\"ide\""));
+
+        // Built-in agents should still be present
+        assert!(hook.contains("CLAUDE_CODE"));
+        assert!(hook.contains("CURSOR_INJECTION"));
+    }
+
+    #[test]
+    fn test_custom_agents_in_bash_hook() {
+        let mut config = config::Config::default();
+        config.agents.insert(
+            "opencode".to_string(),
+            config::CustomAgent {
+                env_var: "OPENCODE".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+
+        let hook = get_bash_hook(&config).expect("Failed to generate bash hook");
+        assert!(hook.contains("OPENCODE"));
+        assert!(hook.contains("executor=\"opencode\""));
+    }
+
+    #[test]
+    fn test_custom_agents_checked_before_builtins() {
+        let mut config = config::Config::default();
+        config.agents.insert(
+            "opencode".to_string(),
+            config::CustomAgent {
+                env_var: "OPENCODE".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+
+        let hook = get_zsh_hook(&config).expect("Failed to generate zsh hook");
+
+        // Custom agents should appear before built-in agent detection
+        let custom_pos = hook.find("OPENCODE").unwrap();
+        let builtin_pos = hook.find("CLAUDE_CODE").unwrap();
+        assert!(
+            custom_pos < builtin_pos,
+            "Custom agents must be checked before built-in agents"
+        );
+    }
+
+    #[test]
+    fn test_custom_agent_unsafe_name_skipped() {
+        let mut config = config::Config::default();
+        config.agents.insert(
+            "bad;name".to_string(),
+            config::CustomAgent {
+                env_var: "SAFE_VAR".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+        config.agents.insert(
+            "good-name".to_string(),
+            config::CustomAgent {
+                env_var: "GOOD_VAR".to_string(),
+                executor_type: "agent".to_string(),
+            },
+        );
+
+        let hook = get_zsh_hook(&config).expect("Failed to generate zsh hook");
+        assert!(
+            !hook.contains("bad;name"),
+            "Unsafe agent name must be skipped"
+        );
+        assert!(hook.contains("GOOD_VAR"), "Safe agent should be present");
+    }
+
+    #[test]
+    fn test_no_custom_agents_default_config() {
+        let config = config::Config::default();
+        let script = executor_detection_script(&config);
+
+        // Should still have built-in agents
+        assert!(script.contains("CLAUDE_CODE"));
+        assert!(script.contains("CURSOR_INJECTION"));
+        // No custom elif blocks between CI and built-in agents
+        let ci_end = script.find("ci-unknown").unwrap();
+        let agent_start = script.find("CLAUDE_CODE").unwrap();
+        let between = &script[ci_end..agent_start];
+        assert!(
+            !between.contains("executor=\""),
+            "No custom agents should appear with default config"
         );
     }
 }

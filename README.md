@@ -120,6 +120,8 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - **Agent stats** — per-agent analytics with top commands, directories, and risk breakdown
 - **Agent report** — export activity as text, markdown, or JSON
 - **Claude Code integration** — `suv init claude-code` captures AI-executed commands via PostToolUse hook
+- **OpenCode integration** — `suv init opencode` installs a plugin for automatic command capture
+- **Custom agent config** — define detection rules for any agent via `suv settings` → Agents tab
 
 ### Tagging, Bookmarks & Notes
 - **Session tags** — categorize sessions (e.g., "work", "personal") for filtering
@@ -574,12 +576,33 @@ suv init antigravity
 
 Auto-detects Antigravity via the `$ANTIGRAVITY_AGENT` environment variable. No additional configuration needed.
 
+### OpenCode
+
+```bash
+suv init opencode
+```
+
+Installs a plugin at `~/.opencode/plugins/suvadu.js` that captures every bash command OpenCode executes, including the user prompt for agent command grouping. Restart OpenCode after setup.
+
+### Custom Agents
+
+For agents not natively supported, add detection rules via `suv settings` → Agents tab, or in `config.toml`:
+
+```toml
+[agents.your-agent]
+env_var = "YOUR_AGENT_ENV_VAR"
+executor_type = "agent"    # or "ide", "ci"
+```
+
+Restart your shell after adding agents (`source ~/.zshrc`).
+
 **Verify any integration:**
 
 ```bash
 suv search --executor agent       # Claude Code
 suv search --executor cursor      # Cursor
 suv search --executor antigravity # Antigravity
+suv search --executor opencode    # OpenCode
 ```
 
 ---
@@ -684,6 +707,7 @@ Shell hooks use native `$EPOCHREALTIME` (Zsh 5.1+ / Bash 5+) for millisecond-pre
 | `suv init claude-code` | Set up Claude Code capture |
 | `suv init cursor` | Set up Cursor tracking |
 | `suv init antigravity` | Set up Antigravity tracking |
+| `suv init opencode` | Set up OpenCode capture |
 | **Utilities** | |
 | `suv completions <shell>` | Generate shell completions (zsh, bash, fish) |
 | `suv man` | Generate man page |

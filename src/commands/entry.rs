@@ -469,6 +469,20 @@ fn get_prompts_dir() -> Option<std::path::PathBuf> {
     Some(dirs.data_dir().join("prompts"))
 }
 
+/// Read cached agent prompt for a session (if any). Used by `suv add` to attach
+/// prompt context when called from agent plugins (opencode, etc.).
+pub fn read_agent_prompt(session_id: &str) -> Option<std::collections::HashMap<String, String>> {
+    let prompts_dir = get_prompts_dir()?;
+    let prompt_file = prompts_dir.join(format!("{session_id}.prompt"));
+    let prompt = std::fs::read_to_string(prompt_file).ok()?;
+    if prompt.is_empty() {
+        return None;
+    }
+    let mut ctx = std::collections::HashMap::new();
+    ctx.insert("agent_prompt".to_string(), prompt);
+    Some(ctx)
+}
+
 /// Count (and optionally delete) files older than `max_age_secs`.
 fn process_old_files(dir: &std::path::Path, max_age_secs: u64, delete: bool) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir) else {

@@ -37,6 +37,8 @@ pub struct Config {
     pub exclusions: Vec<String>,
     #[serde(default)]
     pub auto_tags: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub agents: std::collections::HashMap<String, CustomAgent>,
 }
 
 const fn default_enabled() -> bool {
@@ -54,6 +56,7 @@ impl Default for Config {
             redaction: RedactionConfig::default(),
             exclusions: Vec::new(),
             auto_tags: std::collections::HashMap::new(),
+            agents: std::collections::HashMap::new(),
         }
     }
 }
@@ -133,6 +136,33 @@ impl Default for RedactionConfig {
     fn default() -> Self {
         Self { enabled: true }
     }
+}
+
+/// Custom agent detection rule.
+///
+/// Users can define custom agents in `config.toml` to detect executors
+/// that suvadu doesn't know about natively:
+///
+/// ```toml
+/// [agents.your-agent-name]
+/// env_var = "YOUR_AGENT_ENV_VAR"
+/// executor_type = "agent"
+///
+/// [agents.my-internal-tool]
+/// env_var = "MY_TOOL_SESSION"
+/// executor_type = "ide"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomAgent {
+    /// Environment variable to check for (presence means this agent is active)
+    pub env_var: String,
+    /// Executor type: "agent", "ide", or "ci"
+    #[serde(default = "default_agent_type")]
+    pub executor_type: String,
+}
+
+fn default_agent_type() -> String {
+    "agent".to_string()
 }
 
 const fn default_true() -> bool {
@@ -425,5 +455,55 @@ key = "value"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.enabled);
+    }
+
+    #[test]
+    fn test_custom_agents_deserialization() {
+        let toml_str = r#"
+enabled = true
+
+[agents.opencode]
+env_var = "OPENCODE"
+executor_type = "agent"
+
+[agents.my-internal-tool]
+env_var = "MY_TOOL_SESSION"
+executor_type = "ide"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.agents.len(), 2);
+
+        let opencode = config.agents.get("opencode").unwrap();
+        assert_eq!(opencode.env_var, "OPENCODE");
+        assert_eq!(opencode.executor_type, "agent");
+
+        let my_tool = config.agents.get("my-internal-tool").unwrap();
+        assert_eq!(my_tool.env_var, "MY_TOOL_SESSION");
+        assert_eq!(my_tool.executor_type, "ide");
+    }
+
+    #[test]
+    fn test_custom_agent_default_executor_type() {
+        let toml_str = r#"
+enabled = true
+
+[agents.opencode]
+env_var = "OPENCODE"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let opencode = config.agents.get("opencode").unwrap();
+        assert_eq!(
+            opencode.executor_type, "agent",
+            "executor_type should default to 'agent'"
+        );
+    }
+
+    #[test]
+    fn test_empty_agents_section() {
+        let toml_str = r#"
+enabled = true
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.agents.is_empty());
     }
 }
