@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-03-17
+
+### Added
+- **Custom agent detection** — configurable `[agents]` section in `config.toml` and a new Agents tab in `suv settings` TUI. Define custom agent detection rules with a name, environment variable, and executor type. Custom agents are checked before built-in agents.
+- **`suv init opencode`** — OpenCode integration via plugin. Installs a `tool.execute.after` plugin that records every bash command OpenCode executes, with prompt capture for agent command grouping.
+
+### Fixed
+- **Regex lookahead in secret redaction** — the OpenAI key pattern used an unsupported negative lookahead (`(?!...)`), causing `suv wrap` and other commands to error on first use. Replaced with a compatible pattern. Fixes #9.
+
 ## [0.1.3] - 2026-03-16
 
 ### Fixed
