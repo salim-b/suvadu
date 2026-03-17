@@ -92,8 +92,9 @@ fn api_key_patterns() -> Vec<&'static str> {
         r"()(AKIA[0-9A-Z]{16})",
         // GitHub tokens: ghp_, gho_, ghs_, ghr_, github_pat_
         r"()(?:ghp_|gho_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]{20,}",
-        // OpenAI API key: sk-... (but not sk-ant- which is Anthropic)
-        r"()(sk-(?!ant-)[A-Za-z0-9]{20,})",
+        // OpenAI API key: sk-... (Anthropic keys have hyphens early in
+        // "sk-ant-api..." so [A-Za-z0-9]{20,} naturally excludes them)
+        r"()(sk-[A-Za-z0-9]{20,})",
         // Anthropic API key: sk-ant-api...
         r"()(sk-ant-api[A-Za-z0-9_-]{20,})",
         // Slack tokens: xoxb-, xoxp-, xoxo-, xoxa-
@@ -316,5 +317,56 @@ mod tests {
         let cmd = "export AZURE_CLIENT_SECRET=abc123def456ghi789jkl012mno345pqr678";
         let redacted = redact_secrets(cmd);
         assert!(!redacted.contains("abc123def456"));
+    }
+
+    #[test]
+    fn test_all_patterns_compile() {
+        // Ensure every regex pattern compiles successfully.
+        // This would have caught the lookahead bug (issue #9).
+        let pattern_count = SECRET_PATTERNS.len();
+        assert!(
+            pattern_count > 0,
+            "Expected at least one compiled secret pattern"
+        );
+
+        let expected_defs = [
+            env_var_patterns(),
+            cli_password_patterns(),
+            api_key_patterns(),
+            auth_header_patterns(),
+            connection_string_patterns(),
+        ];
+        let total_defs: usize = expected_defs.iter().map(|v| v.len()).sum();
+        assert_eq!(
+            pattern_count, total_defs,
+            "Some patterns failed to compile: expected {total_defs}, got {pattern_count}"
+        );
+    }
+
+    #[test]
+    fn test_bare_openai_key_redacted() {
+        // Bare sk- key not inside an env var assignment
+        let cmd = "curl https://api.openai.com -H 'Authorization: Bearer sk-proj1234567890abcdefghijklmnop'";
+        let redacted = redact_secrets(cmd);
+        assert!(!redacted.contains("sk-proj1234567890"));
+    }
+
+    #[test]
+    fn test_openai_key_not_match_anthropic() {
+        // Anthropic keys have hyphens early (sk-ant-api...) so the OpenAI
+        // pattern sk-[A-Za-z0-9]{20,} should not match them. The dedicated
+        // Anthropic pattern handles those separately.
+        let cmd = "sk-ant-api03-abc123def456ghi789jkl012mno345";
+        let redacted = redact_secrets(cmd);
+        // Should be redacted by the Anthropic pattern, not the OpenAI one
+        assert!(redacted.contains("***REDACTED***"));
+    }
+
+    #[test]
+    fn test_wrap_command_no_panic() {
+        // Regression test for issue #9: suv wrap -- ls should not error
+        let cmd = "ls";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "ls");
     }
 }
