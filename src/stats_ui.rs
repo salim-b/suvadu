@@ -131,7 +131,13 @@ impl StatsApp {
             .get_daily_activity(period.heatmap_days(), tag_id)
             .unwrap_or_default();
 
-        let program_groups = compute_program_groups(&stats.top_commands);
+        let programs: Vec<&str> = stats
+            .top_commands
+            .iter()
+            .filter_map(|(cmd, _)| cmd.split_whitespace().next())
+            .collect();
+        let alias_map = build_alias_map(repo, &programs);
+        let program_groups = compute_program_groups(&stats.top_commands, &alias_map);
 
         let mut app = Self {
             stats,
@@ -168,7 +174,14 @@ impl StatsApp {
         if let Ok(d) = repo.get_daily_activity(self.period.heatmap_days(), self.tag_id) {
             self.daily_activity = d;
         }
-        self.program_groups = compute_program_groups(&self.stats.top_commands);
+        let programs: Vec<&str> = self
+            .stats
+            .top_commands
+            .iter()
+            .filter_map(|(cmd, _)| cmd.split_whitespace().next())
+            .collect();
+        let alias_map = build_alias_map(repo, &programs);
+        self.program_groups = compute_program_groups(&self.stats.top_commands, &alias_map);
         self.commands_table_state = TableState::default();
         self.dirs_table_state = TableState::default();
         self.programs_table_state = TableState::default();
@@ -985,15 +998,106 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     crate::util::truncate_str(s, max_len, "...")
 }
 
-fn compute_program_groups(top_commands: &[(String, i64)]) -> Vec<(String, i64)> {
+fn compute_program_groups(
+    top_commands: &[(String, i64)],
+    alias_map: &HashMap<String, String>,
+) -> Vec<(String, i64)> {
     let mut groups: HashMap<String, i64> = HashMap::new();
     for (cmd, count) in top_commands {
         let program = cmd.split_whitespace().next().unwrap_or(cmd);
-        *groups.entry(program.to_string()).or_insert(0) += count;
+        let resolved = alias_map.get(program).map(|s| s.as_str()).unwrap_or(program);
+        *groups.entry(resolved.to_string()).or_insert(0) += count;
     }
     let mut sorted: Vec<(String, i64)> = groups.into_iter().collect();
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
     sorted
+}
+
+/// Build a map of alias_name -> resolved_program from suvadu aliases + shell aliases.
+fn build_alias_map(repo: &Repository, programs: &[&str]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    // Layer 1: suvadu alias table (fast DB lookup)
+    if let Ok(aliases) = repo.list_aliases() {
+        for alias in aliases {
+            if let Some(prog) = alias.command.split_whitespace().next() {
+                map.insert(alias.name.clone(), prog.to_string());
+            }
+        }
+    }
+
+    // Layer 2: shell `type` check for programs not resolved by suvadu aliases
+    let unresolved: Vec<&str> = programs
+        .iter()
+        .filter(|p| !map.contains_key(**p))
+        .copied()
+        .collect();
+
+    if !unresolved.is_empty() {
+        if let Some(shell_aliases) = detect_shell_aliases(&unresolved) {
+            map.extend(shell_aliases);
+        }
+    }
+
+    map
+}
+
+/// Run a single shell invocation to detect which programs are shell aliases
+/// and resolve them to their underlying program name.
+fn detect_shell_aliases(programs: &[&str]) -> Option<HashMap<String, String>> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+    // Build a single command: type prog1; type prog2; ...
+    let type_cmds: Vec<String> = programs
+        .iter()
+        .map(|p| format!("type {} 2>/dev/null", p))
+        .collect();
+    let script = type_cmds.join("; ");
+
+    let output = std::process::Command::new(&shell)
+        .args(["-ic", &script])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Some(parse_type_output(&stdout))
+}
+
+/// Parse the output of shell `type` commands to extract alias mappings.
+///
+/// Handles:
+///   zsh:  "gst is an alias for git status"
+///   bash: "gst is aliased to `git status'"
+///         "gst is aliased to 'git status'"
+fn parse_type_output(output: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in output.lines() {
+        let line = line.trim();
+        // zsh format: "NAME is an alias for COMMAND"
+        if let Some(idx) = line.find(" is an alias for ") {
+            let name = &line[..idx];
+            let command = &line[idx + " is an alias for ".len()..];
+            if let Some(prog) = command.split_whitespace().next() {
+                map.insert(name.to_string(), prog.to_string());
+            }
+            continue;
+        }
+        // bash format: "NAME is aliased to `COMMAND'" or "NAME is aliased to 'COMMAND'"
+        if let Some(idx) = line.find(" is aliased to ") {
+            let name = &line[..idx];
+            let raw = &line[idx + " is aliased to ".len()..];
+            // Strip surrounding quotes/backticks
+            let command = raw
+                .trim_start_matches('`')
+                .trim_start_matches('\'')
+                .trim_end_matches('\'');
+            if let Some(prog) = command.split_whitespace().next() {
+                map.insert(name.to_string(), prog.to_string());
+            }
+            continue;
+        }
+    }
+    map
 }
 
 #[cfg(test)]
@@ -1071,14 +1175,14 @@ mod tests {
 
     #[test]
     fn compute_program_groups_empty() {
-        let result = compute_program_groups(&[]);
+        let result = compute_program_groups(&[], &HashMap::new());
         assert!(result.is_empty());
     }
 
     #[test]
     fn compute_program_groups_single_program() {
         let commands = vec![("git status".to_string(), 5), ("git push".to_string(), 3)];
-        let groups = compute_program_groups(&commands);
+        let groups = compute_program_groups(&commands, &HashMap::new());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].0, "git");
         assert_eq!(groups[0].1, 8);
@@ -1092,7 +1196,7 @@ mod tests {
             ("cargo test".to_string(), 8),
             ("ls -la".to_string(), 3),
         ];
-        let groups = compute_program_groups(&commands);
+        let groups = compute_program_groups(&commands, &HashMap::new());
         assert_eq!(groups[0].0, "cargo");
         assert_eq!(groups[0].1, 18);
         assert_eq!(groups[1].0, "git");
@@ -1104,7 +1208,7 @@ mod tests {
     #[test]
     fn compute_program_groups_single_word_command() {
         let commands = vec![("ls".to_string(), 10)];
-        let groups = compute_program_groups(&commands);
+        let groups = compute_program_groups(&commands, &HashMap::new());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].0, "ls");
         assert_eq!(groups[0].1, 10);
@@ -1419,7 +1523,7 @@ mod tests {
     #[test]
     fn compute_program_groups_empty_string_commands() {
         let commands = vec![("".to_string(), 5)];
-        let groups = compute_program_groups(&commands);
+        let groups = compute_program_groups(&commands, &HashMap::new());
         // split_whitespace().next() on "" returns None, so unwrap_or(cmd) gives ""
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].0, "");
@@ -1429,7 +1533,7 @@ mod tests {
     #[test]
     fn compute_program_groups_whitespace_only_commands() {
         let commands = vec![("   ".to_string(), 3)];
-        let groups = compute_program_groups(&commands);
+        let groups = compute_program_groups(&commands, &HashMap::new());
         // split_whitespace().next() on "   " returns None, unwrap_or(cmd) gives "   "
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].0, "   ");
@@ -1444,7 +1548,7 @@ mod tests {
             ("gamma check".to_string(), 5),
             ("alpha build".to_string(), 3),
         ];
-        let groups = compute_program_groups(&commands);
+        let groups = compute_program_groups(&commands, &HashMap::new());
         // alpha: 2+3=5, beta: 10, gamma: 5
         // Sorted descending: beta(10), then alpha(5) or gamma(5) (same count, order may vary)
         assert_eq!(groups[0].0, "beta");
@@ -1452,6 +1556,81 @@ mod tests {
         // The two with count 5 come next
         assert!(groups[1].1 >= groups[2].1);
         assert_eq!(groups.len(), 3);
+    }
+
+    // ── alias resolution tests ────────────────────────────────
+
+    #[test]
+    fn compute_program_groups_with_alias_map() {
+        let mut alias_map = HashMap::new();
+        alias_map.insert("gst".to_string(), "git".to_string());
+        alias_map.insert("gco".to_string(), "git".to_string());
+
+        let commands = vec![
+            ("gst".to_string(), 30),
+            ("gco main".to_string(), 25),
+            ("git push".to_string(), 60),
+            ("docker compose up".to_string(), 40),
+        ];
+        let groups = compute_program_groups(&commands, &alias_map);
+
+        // gst(30) + gco(25) + git(60) = git(115), docker(40)
+        assert_eq!(groups[0].0, "git");
+        assert_eq!(groups[0].1, 115);
+        assert_eq!(groups[1].0, "docker");
+        assert_eq!(groups[1].1, 40);
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn compute_program_groups_alias_no_match_stays() {
+        let mut alias_map = HashMap::new();
+        alias_map.insert("gst".to_string(), "git".to_string());
+
+        let commands = vec![
+            ("unknown_cmd".to_string(), 5),
+            ("gst".to_string(), 10),
+        ];
+        let groups = compute_program_groups(&commands, &alias_map);
+
+        assert_eq!(groups.len(), 2);
+        // git: 10 (from gst), unknown_cmd: 5
+        assert_eq!(groups[0].0, "git");
+        assert_eq!(groups[0].1, 10);
+        assert_eq!(groups[1].0, "unknown_cmd");
+        assert_eq!(groups[1].1, 5);
+    }
+
+    #[test]
+    fn parse_type_output_zsh_format() {
+        let output = "gst is an alias for git status\ngco is an alias for git checkout\n";
+        let map = parse_type_output(output);
+        assert_eq!(map.get("gst").unwrap(), "git");
+        assert_eq!(map.get("gco").unwrap(), "git");
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parse_type_output_bash_format() {
+        let output = "gst is aliased to `git status'\ngco is aliased to 'git checkout'\n";
+        let map = parse_type_output(output);
+        assert_eq!(map.get("gst").unwrap(), "git");
+        assert_eq!(map.get("gco").unwrap(), "git");
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parse_type_output_non_alias_lines_ignored() {
+        let output = "git is /usr/bin/git\nls is /bin/ls\ngst is an alias for git status\n";
+        let map = parse_type_output(output);
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("gst").unwrap(), "git");
+    }
+
+    #[test]
+    fn parse_type_output_empty() {
+        let map = parse_type_output("");
+        assert!(map.is_empty());
     }
 
     // ── 3. build_daily_counts with data ─────────────────────────
