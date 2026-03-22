@@ -149,6 +149,21 @@ _SUVADU_START_TIME=0
 _SUVADU_OFFSET=-1
 _SUVADU_BIN={escaped}
 
+# Shell function wrapper: intercepts `suv search` so the selected command is
+# placed into the editing buffer (via print -z) instead of being printed as
+# dead text.  All other subcommands pass straight through to the binary.
+suv() {{
+    if [[ "${{1:-}}" == "search" ]]; then
+        local selected
+        selected="$("$_SUVADU_BIN" "$@")"
+        if [[ -n "$selected" ]]; then
+            print -z -- "$selected"
+        fi
+    else
+        "$_SUVADU_BIN" "$@"
+    fi
+}}
+
 "#
     )
 }
@@ -207,6 +222,12 @@ add-zsh-hook precmd _suvadu_precmd
 const fn zsh_widgets_script() -> &'static str {
     r#"# Interactive Search Widget
 _suvadu_search_widget() {
+    # Normalize zsh options to defaults for this widget scope. This prevents
+    # interference from user/plugin options (SH_WORD_SPLIT, GLOB_SUBST, etc.)
+    # that can cause BUFFER assignment to silently fail. Standard practice
+    # used by Atuin, fzf, and other ZLE-based tools.
+    emulate -L zsh
+
     local selected tty_dev
 
     # Prefer $TTY (zsh sets this to the actual device, e.g. /dev/ttys003).
@@ -234,31 +255,30 @@ _suvadu_search_widget() {
     stty_state=$(stty -g 2>/dev/null)
 
     # If suvadu is disabled (exit code 10), fallback to default search
-    selected=$($_SUVADU_BIN search --query "$BUFFER" < "$tty_dev")
+    selected="$($_SUVADU_BIN search --query "$BUFFER" < "$tty_dev")"
     local ret=$?
 
     # Restore terminal state
     [[ -n "$stty_state" ]] && stty "$stty_state" 2>/dev/null
 
-    if [ $ret -eq 10 ]; then
+    if [[ $ret -eq 10 ]]; then
         zle .history-incremental-search-backward
         return
     fi
 
-    if [ -n "$selected" ]; then
-        BUFFER="$selected"
-        CURSOR=$#BUFFER
+    if [[ -n "$selected" ]]; then
+        LBUFFER="$selected"
+        RBUFFER=""
     fi
 
-    # Guard against prompt redraw racing with queued keystrokes — a known
-    # source of visual corruption with p10k instant prompt.
-    if [[ ${KEYS_QUEUED_COUNT:-0} -eq 0 ]]; then
-        zle reset-prompt
-    fi
+    zle reset-prompt
+    zle -R
 }
 
 # Up Arrow Widget (Native Cycling)
 _suvadu_up_arrow_widget() {
+    emulate -L zsh
+
     # If starting fresh, reset state
     if [[ "$LASTWIDGET" != suvadu-* && "$LASTWIDGET" != *autosuggest* && "$LASTWIDGET" != zle-line-* && "$LASTWIDGET" != *highlight* ]]; then
         _SUVADU_OFFSET=0
@@ -273,19 +293,22 @@ _suvadu_up_arrow_widget() {
     fi
 
     local result
-    result=$($_SUVADU_BIN get --query "$_SUVADU_QUERY" --offset $_SUVADU_OFFSET --prefix --cwd "$PWD" 2>/dev/null)
+    result="$($_SUVADU_BIN get --query "$_SUVADU_QUERY" --offset $_SUVADU_OFFSET --prefix --cwd "$PWD" 2>/dev/null)"
 
     if [[ -n "$result" ]]; then
-        BUFFER="$result"
-        CURSOR=$#BUFFER
+        LBUFFER="$result"
+        RBUFFER=""
     else
         # No more results, stay at the last found or current
         [[ $_SUVADU_OFFSET -gt 0 ]] && ((_SUVADU_OFFSET--))
     fi
+    zle -R
 }
 
 # Down Arrow Widget (Native Cycling)
 _suvadu_down_arrow_widget() {
+    emulate -L zsh
+
     # If not already in history mode, use standard down-line-or-history
     if [[ "$LASTWIDGET" != suvadu-* && "$LASTWIDGET" != *autosuggest* && "$LASTWIDGET" != zle-line-* && "$LASTWIDGET" != *highlight* ]]; then
         zle down-line-or-history
@@ -295,20 +318,21 @@ _suvadu_down_arrow_widget() {
     if [[ $_SUVADU_OFFSET -gt 0 ]]; then
         ((_SUVADU_OFFSET--))
         local result
-        result=$($_SUVADU_BIN get --query "$_SUVADU_QUERY" --offset $_SUVADU_OFFSET --prefix --cwd "$PWD" 2>/dev/null)
+        result="$($_SUVADU_BIN get --query "$_SUVADU_QUERY" --offset $_SUVADU_OFFSET --prefix --cwd "$PWD" 2>/dev/null)"
         if [[ -n "$result" ]]; then
-            BUFFER="$result"
-            CURSOR=$#BUFFER
+            LBUFFER="$result"
+            RBUFFER=""
         fi
     elif [[ $_SUVADU_OFFSET -eq 0 ]]; then
         # Restore original input and set state to prompt (-1)
-        BUFFER="$_SUVADU_QUERY"
-        CURSOR=$#BUFFER
+        LBUFFER="$_SUVADU_QUERY"
+        RBUFFER=""
         _SUVADU_OFFSET=-1
     else
         # We are at prompt (-1), pass through
         zle down-line-or-history
     fi
+    zle -R
 }
 
 
@@ -347,6 +371,23 @@ export SUVADU_SESSION_ID="${{SUVADU_SESSION_ID:-$(uuidgen 2>/dev/null || cat /pr
 _SUVADU_START_TIME=0
 _SUVADU_CMD=""
 _SUVADU_BIN={escaped}
+
+# Shell function wrapper: intercepts `suv search` so the selected command is
+# placed into readline history (press Up to recall) instead of being printed
+# as dead text.  All other subcommands pass straight through to the binary.
+suv() {{
+    if [[ "${{1:-}}" == "search" ]]; then
+        local selected
+        selected="$("$_SUVADU_BIN" "$@")"
+        if [[ -n "$selected" ]]; then
+            history -s -- "$selected"
+            echo "$selected"
+            echo "[suv] Command added to history — press Up to recall."
+        fi
+    else
+        "$_SUVADU_BIN" "$@"
+    fi
+}}
 
 "#
     )
@@ -579,6 +620,25 @@ mod tests {
         assert!(hook.contains("zle -N suvadu-search"));
         assert!(hook.contains("bindkey '^R' suvadu-search"));
 
+        // Verify ZLE widget hardening (issue #6 — dead text bug)
+        // All widgets must use emulate -L zsh to prevent interference from
+        // user/plugin options (p10k, oh-my-zsh, etc.)
+        assert!(hook.contains("emulate -L zsh"), "search widget missing emulate -L zsh");
+        assert!(hook.matches("emulate -L zsh").count() == 3,
+            "expected emulate -L zsh in all 3 widgets");
+        // Widgets must use LBUFFER/RBUFFER (not BUFFER/CURSOR) for buffer placement
+        assert!(hook.contains("LBUFFER=\"$selected\""));
+        assert!(hook.contains("LBUFFER=\"$result\""));
+        // Search widget must always call zle reset-prompt + zle -R
+        assert!(hook.contains("zle reset-prompt"));
+        assert!(hook.contains("zle -R"));
+
+        // Verify suv() shell function wrapper for `suv search` (issue #6)
+        // Must use print -z to inject into the editing buffer
+        assert!(hook.contains("suv()"), "missing suv() shell function wrapper");
+        assert!(hook.contains("print -z -- \"$selected\""),
+            "suv() wrapper must use print -z to inject into buffer");
+
         // Verify executor detection logic
         assert!(hook.contains("ANTIGRAVITY_AGENT"));
         assert!(hook.contains("GITHUB_ACTIONS"));
@@ -610,6 +670,69 @@ mod tests {
         assert!(hook.contains("PROMPT_COMMAND"));
         assert!(hook.contains("bind -x"));
         assert!(hook.contains("BASH_VERSINFO"));
+
+        // Verify suv() shell function wrapper for `suv search` (issue #6)
+        assert!(hook.contains("suv()"), "missing suv() shell function wrapper in bash");
+        assert!(hook.contains("history -s -- \"$selected\""),
+            "bash suv() wrapper must use history -s to recall via Up arrow");
+    }
+
+    #[test]
+    fn test_zsh_suv_wrapper_structure() {
+        let config = config::Config::default();
+        let hook = get_zsh_hook(&config).expect("Failed to generate zsh hook");
+
+        // The suv() function must be defined exactly once
+        assert_eq!(hook.matches("suv() {").count(), 1,
+            "suv() wrapper must be defined exactly once");
+
+        // Must check for "search" subcommand specifically
+        assert!(hook.contains(r#"== "search""#),
+            "wrapper must check for 'search' subcommand");
+
+        // Must delegate to $_SUVADU_BIN for the actual binary call
+        assert!(hook.contains(r#""$_SUVADU_BIN" "$@""#),
+            "wrapper must delegate to $_SUVADU_BIN with all args");
+
+        // Non-search subcommands must pass through (the else branch)
+        // Count: one in the search branch, one in the else branch
+        let bin_calls = hook.matches(r#""$_SUVADU_BIN" "$@""#).count();
+        assert_eq!(bin_calls, 2,
+            "expected 2 $_SUVADU_BIN calls (search + passthrough), found {bin_calls}");
+
+        // Must NOT use BUFFER/CURSOR in the wrapper (those are ZLE-only)
+        // Extract just the suv() function body
+        let wrapper_start = hook.find("suv() {").unwrap();
+        let wrapper_end = hook[wrapper_start..].find("\n}\n").unwrap() + wrapper_start;
+        let wrapper = &hook[wrapper_start..wrapper_end];
+        assert!(!wrapper.contains("LBUFFER"), "suv() wrapper must not use LBUFFER (ZLE-only)");
+        assert!(!wrapper.contains("RBUFFER"), "suv() wrapper must not use RBUFFER (ZLE-only)");
+    }
+
+    #[test]
+    fn test_bash_suv_wrapper_structure() {
+        let config = config::Config::default();
+        let hook = get_bash_hook(&config).expect("Failed to generate bash hook");
+
+        // The suv() function must be defined exactly once
+        assert_eq!(hook.matches("suv() {").count(), 1,
+            "suv() wrapper must be defined exactly once in bash");
+
+        // Must check for "search" subcommand
+        assert!(hook.contains(r#"== "search""#),
+            "bash wrapper must check for 'search' subcommand");
+
+        // Must delegate to $_SUVADU_BIN
+        let bin_calls = hook.matches(r#""$_SUVADU_BIN" "$@""#).count();
+        assert_eq!(bin_calls, 2,
+            "expected 2 $_SUVADU_BIN calls in bash (search + passthrough), found {bin_calls}");
+
+        // Must NOT use zsh-specific constructs
+        let wrapper_start = hook.find("suv() {").unwrap();
+        let wrapper_end = hook[wrapper_start..].find("\n}\n").unwrap() + wrapper_start;
+        let wrapper = &hook[wrapper_start..wrapper_end];
+        assert!(!wrapper.contains("print -z"), "bash wrapper must not use print -z (zsh-only)");
+        assert!(!wrapper.contains("LBUFFER"), "bash wrapper must not use LBUFFER (ZLE-only)");
     }
 
     #[test]
