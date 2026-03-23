@@ -1194,11 +1194,7 @@ where
             match app.handle_input(key, repo) {
                 DashboardAction::Quit => return Ok(()),
                 DashboardAction::OpenPrompts => {
-                    super::prompts::run_prompt_explorer(
-                        terminal,
-                        &app.entries,
-                        Some(repo),
-                    )?;
+                    super::prompts::run_prompt_explorer(terminal, &app.entries, Some(repo))?;
                 }
                 DashboardAction::Continue => {}
             }

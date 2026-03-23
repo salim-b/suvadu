@@ -1005,7 +1005,10 @@ fn compute_program_groups(
     let mut groups: HashMap<String, i64> = HashMap::new();
     for (cmd, count) in top_commands {
         let program = cmd.split_whitespace().next().unwrap_or(cmd);
-        let resolved = alias_map.get(program).map(|s| s.as_str()).unwrap_or(program);
+        let resolved = alias_map
+            .get(program)
+            .map(|s| s.as_str())
+            .unwrap_or(program);
         *groups.entry(resolved.to_string()).or_insert(0) += count;
     }
     let mut sorted: Vec<(String, i64)> = groups.into_iter().collect();
@@ -1587,10 +1590,7 @@ mod tests {
         let mut alias_map = HashMap::new();
         alias_map.insert("gst".to_string(), "git".to_string());
 
-        let commands = vec![
-            ("unknown_cmd".to_string(), 5),
-            ("gst".to_string(), 10),
-        ];
+        let commands = vec![("unknown_cmd".to_string(), 5), ("gst".to_string(), 10)];
         let groups = compute_program_groups(&commands, &alias_map);
 
         assert_eq!(groups.len(), 2);

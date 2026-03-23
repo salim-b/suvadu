@@ -623,9 +623,14 @@ mod tests {
         // Verify ZLE widget hardening (issue #6 — dead text bug)
         // All widgets must use emulate -L zsh to prevent interference from
         // user/plugin options (p10k, oh-my-zsh, etc.)
-        assert!(hook.contains("emulate -L zsh"), "search widget missing emulate -L zsh");
-        assert!(hook.matches("emulate -L zsh").count() == 3,
-            "expected emulate -L zsh in all 3 widgets");
+        assert!(
+            hook.contains("emulate -L zsh"),
+            "search widget missing emulate -L zsh"
+        );
+        assert!(
+            hook.matches("emulate -L zsh").count() == 3,
+            "expected emulate -L zsh in all 3 widgets"
+        );
         // Widgets must use LBUFFER/RBUFFER (not BUFFER/CURSOR) for buffer placement
         assert!(hook.contains("LBUFFER=\"$selected\""));
         assert!(hook.contains("LBUFFER=\"$result\""));
@@ -635,9 +640,14 @@ mod tests {
 
         // Verify suv() shell function wrapper for `suv search` (issue #6)
         // Must use print -z to inject into the editing buffer
-        assert!(hook.contains("suv()"), "missing suv() shell function wrapper");
-        assert!(hook.contains("print -z -- \"$selected\""),
-            "suv() wrapper must use print -z to inject into buffer");
+        assert!(
+            hook.contains("suv()"),
+            "missing suv() shell function wrapper"
+        );
+        assert!(
+            hook.contains("print -z -- \"$selected\""),
+            "suv() wrapper must use print -z to inject into buffer"
+        );
 
         // Verify executor detection logic
         assert!(hook.contains("ANTIGRAVITY_AGENT"));
@@ -672,9 +682,14 @@ mod tests {
         assert!(hook.contains("BASH_VERSINFO"));
 
         // Verify suv() shell function wrapper for `suv search` (issue #6)
-        assert!(hook.contains("suv()"), "missing suv() shell function wrapper in bash");
-        assert!(hook.contains("history -s -- \"$selected\""),
-            "bash suv() wrapper must use history -s to recall via Up arrow");
+        assert!(
+            hook.contains("suv()"),
+            "missing suv() shell function wrapper in bash"
+        );
+        assert!(
+            hook.contains("history -s -- \"$selected\""),
+            "bash suv() wrapper must use history -s to recall via Up arrow"
+        );
     }
 
     #[test]
@@ -683,30 +698,45 @@ mod tests {
         let hook = get_zsh_hook(&config).expect("Failed to generate zsh hook");
 
         // The suv() function must be defined exactly once
-        assert_eq!(hook.matches("suv() {").count(), 1,
-            "suv() wrapper must be defined exactly once");
+        assert_eq!(
+            hook.matches("suv() {").count(),
+            1,
+            "suv() wrapper must be defined exactly once"
+        );
 
         // Must check for "search" subcommand specifically
-        assert!(hook.contains(r#"== "search""#),
-            "wrapper must check for 'search' subcommand");
+        assert!(
+            hook.contains(r#"== "search""#),
+            "wrapper must check for 'search' subcommand"
+        );
 
         // Must delegate to $_SUVADU_BIN for the actual binary call
-        assert!(hook.contains(r#""$_SUVADU_BIN" "$@""#),
-            "wrapper must delegate to $_SUVADU_BIN with all args");
+        assert!(
+            hook.contains(r#""$_SUVADU_BIN" "$@""#),
+            "wrapper must delegate to $_SUVADU_BIN with all args"
+        );
 
         // Non-search subcommands must pass through (the else branch)
         // Count: one in the search branch, one in the else branch
         let bin_calls = hook.matches(r#""$_SUVADU_BIN" "$@""#).count();
-        assert_eq!(bin_calls, 2,
-            "expected 2 $_SUVADU_BIN calls (search + passthrough), found {bin_calls}");
+        assert_eq!(
+            bin_calls, 2,
+            "expected 2 $_SUVADU_BIN calls (search + passthrough), found {bin_calls}"
+        );
 
         // Must NOT use BUFFER/CURSOR in the wrapper (those are ZLE-only)
         // Extract just the suv() function body
         let wrapper_start = hook.find("suv() {").unwrap();
         let wrapper_end = hook[wrapper_start..].find("\n}\n").unwrap() + wrapper_start;
         let wrapper = &hook[wrapper_start..wrapper_end];
-        assert!(!wrapper.contains("LBUFFER"), "suv() wrapper must not use LBUFFER (ZLE-only)");
-        assert!(!wrapper.contains("RBUFFER"), "suv() wrapper must not use RBUFFER (ZLE-only)");
+        assert!(
+            !wrapper.contains("LBUFFER"),
+            "suv() wrapper must not use LBUFFER (ZLE-only)"
+        );
+        assert!(
+            !wrapper.contains("RBUFFER"),
+            "suv() wrapper must not use RBUFFER (ZLE-only)"
+        );
     }
 
     #[test]
@@ -715,24 +745,37 @@ mod tests {
         let hook = get_bash_hook(&config).expect("Failed to generate bash hook");
 
         // The suv() function must be defined exactly once
-        assert_eq!(hook.matches("suv() {").count(), 1,
-            "suv() wrapper must be defined exactly once in bash");
+        assert_eq!(
+            hook.matches("suv() {").count(),
+            1,
+            "suv() wrapper must be defined exactly once in bash"
+        );
 
         // Must check for "search" subcommand
-        assert!(hook.contains(r#"== "search""#),
-            "bash wrapper must check for 'search' subcommand");
+        assert!(
+            hook.contains(r#"== "search""#),
+            "bash wrapper must check for 'search' subcommand"
+        );
 
         // Must delegate to $_SUVADU_BIN
         let bin_calls = hook.matches(r#""$_SUVADU_BIN" "$@""#).count();
-        assert_eq!(bin_calls, 2,
-            "expected 2 $_SUVADU_BIN calls in bash (search + passthrough), found {bin_calls}");
+        assert_eq!(
+            bin_calls, 2,
+            "expected 2 $_SUVADU_BIN calls in bash (search + passthrough), found {bin_calls}"
+        );
 
         // Must NOT use zsh-specific constructs
         let wrapper_start = hook.find("suv() {").unwrap();
         let wrapper_end = hook[wrapper_start..].find("\n}\n").unwrap() + wrapper_start;
         let wrapper = &hook[wrapper_start..wrapper_end];
-        assert!(!wrapper.contains("print -z"), "bash wrapper must not use print -z (zsh-only)");
-        assert!(!wrapper.contains("LBUFFER"), "bash wrapper must not use LBUFFER (ZLE-only)");
+        assert!(
+            !wrapper.contains("print -z"),
+            "bash wrapper must not use print -z (zsh-only)"
+        );
+        assert!(
+            !wrapper.contains("LBUFFER"),
+            "bash wrapper must not use LBUFFER (ZLE-only)"
+        );
     }
 
     #[test]

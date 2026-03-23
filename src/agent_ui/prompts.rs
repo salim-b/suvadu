@@ -241,11 +241,10 @@ impl<'a> PromptExplorerApp<'a> {
 
     fn detail_entries(&self) -> &[usize] {
         match self.view {
-            View::Detail { group_index } => {
-                self.groups
-                    .get(group_index)
-                    .map_or(&[], |g| &g.entry_indices)
-            }
+            View::Detail { group_index } => self
+                .groups
+                .get(group_index)
+                .map_or(&[], |g| &g.entry_indices),
             View::List => &[],
         }
     }
@@ -294,8 +293,7 @@ impl<'a> PromptExplorerApp<'a> {
             KeyCode::Down | KeyCode::Char('j') => {
                 let max = self.list_page_slice().len().saturating_sub(1);
                 if let Some(cur) = self.list_table.selected() {
-                    self.list_table
-                        .select(Some(cur.saturating_add(1).min(max)));
+                    self.list_table.select(Some(cur.saturating_add(1).min(max)));
                 }
             }
             KeyCode::Home => {
@@ -359,12 +357,10 @@ impl<'a> PromptExplorerApp<'a> {
                         .and_then(|mut c| c.set_text(entry.command.clone()))
                     {
                         Ok(()) => {
-                            self.status_message =
-                                Some(("Copied!".into(), Instant::now()));
+                            self.status_message = Some(("Copied!".into(), Instant::now()));
                         }
                         Err(_) => {
-                            self.status_message =
-                                Some(("Copy failed".into(), Instant::now()));
+                            self.status_message = Some(("Copy failed".into(), Instant::now()));
                         }
                     }
                 }
@@ -444,23 +440,17 @@ impl<'a> PromptExplorerApp<'a> {
         let header_line = Line::from(vec![
             Span::styled(
                 " PROMPT EXPLORER ",
-                Style::default()
-                    .fg(t.primary)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
             ),
             Span::styled("  ", Style::default()),
             Span::styled(
                 format!("{}", self.groups.len()),
-                Style::default()
-                    .fg(t.info)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.info).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" prompts  ", Style::default().fg(t.text_secondary)),
             Span::styled(
                 format!("{total_cmds}"),
-                Style::default()
-                    .fg(t.info)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.info).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" commands", Style::default().fg(t.text_secondary)),
         ]);
@@ -584,9 +574,7 @@ impl<'a> PromptExplorerApp<'a> {
                     .border_style(Style::default().fg(t.border))
                     .title(Span::styled(
                         " Prompts ",
-                        Style::default()
-                            .fg(t.primary)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
                     )),
             );
 
@@ -631,9 +619,7 @@ impl<'a> PromptExplorerApp<'a> {
             .border_style(Style::default().fg(t.border))
             .title(Span::styled(
                 " Prompt ",
-                Style::default()
-                    .fg(t.primary)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);
@@ -665,10 +651,7 @@ impl<'a> PromptExplorerApp<'a> {
                     .fg(t.text_secondary)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                session_short,
-                Style::default().fg(t.primary_dim),
-            ),
+            Span::styled(session_short, Style::default().fg(t.primary_dim)),
         ]));
 
         // Executor
@@ -694,10 +677,7 @@ impl<'a> PromptExplorerApp<'a> {
                     .fg(t.text_secondary)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                path_display,
-                Style::default().fg(t.badge_path),
-            ),
+            Span::styled(path_display, Style::default().fg(t.badge_path)),
         ]));
 
         // Time range
@@ -755,12 +735,7 @@ impl<'a> PromptExplorerApp<'a> {
         f.render_widget(Paragraph::new(lines), inner);
     }
 
-    fn render_list_footer(
-        &self,
-        f: &mut ratatui::Frame,
-        area: Rect,
-        t: &crate::theme::Theme,
-    ) {
+    fn render_list_footer(&self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {
         let badge_key = Style::default()
             .fg(t.bg_elevated)
             .bg(t.text_secondary)
@@ -821,7 +796,7 @@ impl<'a> PromptExplorerApp<'a> {
             .constraints([
                 Constraint::Length(prompt_box_h), // prompt area
                 Constraint::Min(6),               // command table + detail pane
-                Constraint::Length(1),             // footer
+                Constraint::Length(1),            // footer
             ])
             .split(size);
 
@@ -860,9 +835,7 @@ impl<'a> PromptExplorerApp<'a> {
             .border_style(Style::default().fg(t.border_focus))
             .title(Span::styled(
                 " Prompt ",
-                Style::default()
-                    .fg(t.primary)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);
@@ -1007,9 +980,7 @@ impl<'a> PromptExplorerApp<'a> {
                     .border_style(Style::default().fg(t.border))
                     .title(Span::styled(
                         " Commands ",
-                        Style::default()
-                            .fg(t.primary)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
                     )),
             );
 
@@ -1039,9 +1010,7 @@ impl<'a> PromptExplorerApp<'a> {
             .border_style(Style::default().fg(t.border))
             .title(Span::styled(
                 " Detail ",
-                Style::default()
-                    .fg(t.primary)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);
@@ -1131,12 +1100,7 @@ impl<'a> PromptExplorerApp<'a> {
         f.render_widget(Paragraph::new(lines), inner);
     }
 
-    fn render_detail_footer(
-        &self,
-        f: &mut ratatui::Frame,
-        area: Rect,
-        t: &crate::theme::Theme,
-    ) {
+    fn render_detail_footer(&self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {
         let badge_key = Style::default()
             .fg(t.bg_elevated)
             .bg(t.text_secondary)
@@ -1326,8 +1290,24 @@ mod tests {
     #[test]
     fn build_prompt_groups_single_group() {
         let entries = vec![
-            make_entry_with_prompt("s1", "git status", "check repo", "claude-code", Some(0), 1000, 50),
-            make_entry_with_prompt("s1", "git diff", "check repo", "claude-code", Some(0), 2000, 30),
+            make_entry_with_prompt(
+                "s1",
+                "git status",
+                "check repo",
+                "claude-code",
+                Some(0),
+                1000,
+                50,
+            ),
+            make_entry_with_prompt(
+                "s1",
+                "git diff",
+                "check repo",
+                "claude-code",
+                Some(0),
+                2000,
+                30,
+            ),
         ];
         let groups = build_prompt_groups(&entries);
         assert_eq!(groups.len(), 1);
@@ -1351,8 +1331,24 @@ mod tests {
     #[test]
     fn build_prompt_groups_same_session_different_prompts() {
         let entries = vec![
-            make_entry_with_prompt("s1", "git status", "check repo", "claude-code", Some(0), 1000, 10),
-            make_entry_with_prompt("s1", "cargo test", "run tests", "claude-code", Some(0), 2000, 10),
+            make_entry_with_prompt(
+                "s1",
+                "git status",
+                "check repo",
+                "claude-code",
+                Some(0),
+                1000,
+                10,
+            ),
+            make_entry_with_prompt(
+                "s1",
+                "cargo test",
+                "run tests",
+                "claude-code",
+                Some(0),
+                2000,
+                10,
+            ),
         ];
         let groups = build_prompt_groups(&entries);
         assert_eq!(groups.len(), 2);
@@ -1385,7 +1381,7 @@ mod tests {
         let g = &groups[0];
         assert_eq!(g.cmd_count, 3);
         assert_eq!(g.success_count, 2); // cmd1 + cmd3
-        assert_eq!(g.fail_count, 1);    // cmd2 (exit 1)
+        assert_eq!(g.fail_count, 1); // cmd2 (exit 1)
         assert_eq!(g.total_duration_ms, 600);
         assert_eq!(g.first_at, 1000);
         assert_eq!(g.last_at, 3000);
@@ -1419,8 +1415,8 @@ mod tests {
         let g = &groups[0];
         assert_eq!(g.cmd_count, 4);
         assert_eq!(g.success_count, 1); // only cmd3
-        assert_eq!(g.fail_count, 1);    // only cmd4
-        // cmd1 + cmd2 have None — neither success nor fail
+        assert_eq!(g.fail_count, 1); // only cmd4
+                                     // cmd1 + cmd2 have None — neither success nor fail
     }
 
     // ── App state tests ─────────────────────────────────────
@@ -1435,9 +1431,15 @@ mod tests {
 
     #[test]
     fn app_new_with_entries() {
-        let entries = vec![
-            make_entry_with_prompt("s1", "ls", "list files", "claude-code", Some(0), 1000, 10),
-        ];
+        let entries = vec![make_entry_with_prompt(
+            "s1",
+            "ls",
+            "list files",
+            "claude-code",
+            Some(0),
+            1000,
+            10,
+        )];
         let app = PromptExplorerApp::new(&entries);
         assert_eq!(app.groups.len(), 1);
         assert_eq!(app.list_table.selected(), Some(0));
@@ -1508,9 +1510,15 @@ mod tests {
 
     #[test]
     fn app_detail_tab_toggles_pane() {
-        let entries = vec![
-            make_entry_with_prompt("s1", "ls", "prompt", "cc", Some(0), 1000, 10),
-        ];
+        let entries = vec![make_entry_with_prompt(
+            "s1",
+            "ls",
+            "prompt",
+            "cc",
+            Some(0),
+            1000,
+            10,
+        )];
         let mut app = PromptExplorerApp::new(&entries);
 
         // Enter detail
@@ -1527,9 +1535,15 @@ mod tests {
 
     #[test]
     fn app_backspace_returns_from_detail() {
-        let entries = vec![
-            make_entry_with_prompt("s1", "ls", "prompt", "cc", Some(0), 1000, 10),
-        ];
+        let entries = vec![make_entry_with_prompt(
+            "s1",
+            "ls",
+            "prompt",
+            "cc",
+            Some(0),
+            1000,
+            10,
+        )];
         let mut app = PromptExplorerApp::new(&entries);
 
         let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
@@ -1571,15 +1585,24 @@ mod tests {
 
     #[test]
     fn app_session_shortcut_returns_open_session() {
-        let entries = vec![
-            make_entry_with_prompt("sess-abc-123", "ls", "prompt", "cc", Some(0), 1000, 10),
-        ];
+        let entries = vec![make_entry_with_prompt(
+            "sess-abc-123",
+            "ls",
+            "prompt",
+            "cc",
+            Some(0),
+            1000,
+            10,
+        )];
         let mut app = PromptExplorerApp::new(&entries);
         let s = crossterm::event::KeyEvent::from(KeyCode::Char('s'));
         let action = app.handle_input(s);
         match action {
             PromptAction::OpenSession(sid) => assert_eq!(sid, "sess-abc-123"),
-            other => panic!("expected OpenSession, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected OpenSession, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -1594,9 +1617,15 @@ mod tests {
 
     #[test]
     fn app_copy_in_detail_does_not_panic() {
-        let entries = vec![
-            make_entry_with_prompt("s1", "echo hello", "prompt", "cc", Some(0), 1000, 10),
-        ];
+        let entries = vec![make_entry_with_prompt(
+            "s1",
+            "echo hello",
+            "prompt",
+            "cc",
+            Some(0),
+            1000,
+            10,
+        )];
         let mut app = PromptExplorerApp::new(&entries);
 
         // Enter detail
@@ -1605,10 +1634,7 @@ mod tests {
         assert!(matches!(app.view, View::Detail { .. }));
 
         // Ctrl+Y (may fail to copy in CI/test but should not panic)
-        let ctrl_y = crossterm::event::KeyEvent::new(
-            KeyCode::Char('y'),
-            KeyModifiers::CONTROL,
-        );
+        let ctrl_y = crossterm::event::KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL);
         let action = app.handle_input(ctrl_y);
         assert!(matches!(action, PromptAction::Continue));
         // Status message should be set (either Copied! or Copy failed)

@@ -772,7 +772,11 @@ impl SearchApp {
 
         // Executor selector (field 4)
         let is_exec_focused = self.filters.focus_index == 4;
-        let exec_border = if is_exec_focused { t.border_focus } else { t.border };
+        let exec_border = if is_exec_focused {
+            t.border_focus
+        } else {
+            t.border
+        };
         let sel = self.filters.executor_sel;
         let display = if sel == 0 {
             "All".to_string()
@@ -788,7 +792,11 @@ impl SearchApp {
         } else {
             Style::default().fg(t.text_secondary)
         };
-        let hint_suffix = if is_exec_focused { "  ↑↓ to select" } else { "" };
+        let hint_suffix = if is_exec_focused {
+            "  ↑↓ to select"
+        } else {
+            ""
+        };
         let exec_widget = Paragraph::new(format!("  {display}{hint_suffix}"))
             .block(
                 Block::default()

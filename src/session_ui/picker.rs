@@ -217,22 +217,19 @@ impl PickerApp {
             "—".into()
         };
 
-        let id_display: String = s
-            .id
-            .strip_prefix("claude-")
-            .or_else(|| s.id.strip_prefix("opencode-"))
-            .or_else(|| s.id.strip_prefix("cursor-"))
-            .unwrap_or(&s.id)
-            .to_string();
+        let id_display: String =
+            s.id.strip_prefix("claude-")
+                .or_else(|| s.id.strip_prefix("opencode-"))
+                .or_else(|| s.id.strip_prefix("cursor-"))
+                .unwrap_or(&s.id)
+                .to_string();
 
         Row::new(vec![
-            Cell::from(id_display)
-                .style(Style::default().fg(t.info).add_modifier(Modifier::BOLD)),
+            Cell::from(id_display).style(Style::default().fg(t.info).add_modifier(Modifier::BOLD)),
             Cell::from(tag_str).style(Style::default().fg(t.primary)),
             Cell::from(first_cmd).style(Style::default().fg(t.text_muted)),
             Cell::from(last_cmd).style(Style::default().fg(t.text_muted)),
-            Cell::from(format!("{}", s.cmd_count))
-                .style(Style::default().fg(t.text_secondary)),
+            Cell::from(format!("{}", s.cmd_count)).style(Style::default().fg(t.text_secondary)),
             Cell::from(format!("{rate:.0}%")).style(rate_style),
             Cell::from(duration).style(Style::default().fg(t.text_muted)),
         ])
@@ -426,11 +423,7 @@ impl PickerApp {
 
         // Fields
         let fields: [(&str, &str, &str); NUM_FILTER_FIELDS] = [
-            (
-                "Tag Name",
-                &self.filter.tag_input,
-                "e.g. work, personal",
-            ),
+            ("Tag Name", &self.filter.tag_input, "e.g. work, personal"),
             (
                 "Start Date (After)",
                 &self.filter.start_date_input,
@@ -466,20 +459,16 @@ impl PickerApp {
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .border_style(Style::default().fg(border_color))
-                        .title(format!(
-                            "{title}{}",
-                            if is_focused { " *" } else { "" }
-                        )),
+                        .title(format!("{title}{}", if is_focused { " *" } else { "" })),
                 )
                 .style(text_style);
             f.render_widget(input, chunks[i + 1]);
         }
 
         // Help
-        let help_text =
-            Paragraph::new("Tab/S-Tab: switch fields  |  Enter: apply  |  Esc: cancel")
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(t.text_muted));
+        let help_text = Paragraph::new("Tab/S-Tab: switch fields  |  Enter: apply  |  Esc: cancel")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(t.text_muted));
         f.render_widget(help_text, chunks[4]);
     }
 
@@ -772,14 +761,17 @@ where
                         app.filter.popup_open = false;
                         // Discard pending edits — restore from applied values
                         app.filter.tag_input = app.filter.tag_query.clone();
-                        app.filter.start_date_input = app.filter.after_ms
+                        app.filter.start_date_input = app
+                            .filter
+                            .after_ms
                             .map_or_else(String::new, |_| app.filter.start_date_input.clone());
-                        app.filter.end_date_input = app.filter.before_ms
+                        app.filter.end_date_input = app
+                            .filter
+                            .before_ms
                             .map_or_else(String::new, |_| app.filter.end_date_input.clone());
                     }
                     KeyCode::Tab => {
-                        app.filter.focus_index =
-                            (app.filter.focus_index + 1) % NUM_FILTER_FIELDS;
+                        app.filter.focus_index = (app.filter.focus_index + 1) % NUM_FILTER_FIELDS;
                     }
                     KeyCode::BackTab => {
                         app.filter.focus_index = if app.filter.focus_index == 0 {
@@ -790,8 +782,7 @@ where
                     }
                     KeyCode::Enter => {
                         // Apply filters
-                        app.filter.tag_query =
-                            app.filter.tag_input.trim().to_lowercase();
+                        app.filter.tag_query = app.filter.tag_input.trim().to_lowercase();
                         app.filter.after_ms = if app.filter.start_date_input.is_empty() {
                             None
                         } else {
@@ -806,9 +797,15 @@ where
                         app.rebuild_visible();
                     }
                     KeyCode::Backspace => match app.filter.focus_index {
-                        0 => { app.filter.tag_input.pop(); }
-                        1 => { app.filter.start_date_input.pop(); }
-                        2 => { app.filter.end_date_input.pop(); }
+                        0 => {
+                            app.filter.tag_input.pop();
+                        }
+                        1 => {
+                            app.filter.start_date_input.pop();
+                        }
+                        2 => {
+                            app.filter.end_date_input.pop();
+                        }
                         _ => {}
                     },
                     KeyCode::Char(c) => match app.filter.focus_index {
@@ -836,27 +833,19 @@ where
                     KeyCode::Enter => {
                         return Ok(app.selected_session_id().map(String::from));
                     }
-                    KeyCode::Down | KeyCode::Char('j')
-                        if app.filter.search.is_empty() =>
-                    {
+                    KeyCode::Down | KeyCode::Char('j') if app.filter.search.is_empty() => {
                         app.next();
                     }
-                    KeyCode::Up | KeyCode::Char('k')
-                        if app.filter.search.is_empty() =>
-                    {
+                    KeyCode::Up | KeyCode::Char('k') if app.filter.search.is_empty() => {
                         app.prev();
                     }
                     KeyCode::Down => app.next(),
                     KeyCode::Up => app.prev(),
-                    KeyCode::Char('f')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
+                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.filter.popup_open = true;
                         app.filter.focus_index = 0;
                     }
-                    KeyCode::Char('x')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
+                    KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.clear_filters();
                     }
                     KeyCode::Backspace => {

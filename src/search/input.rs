@@ -347,11 +347,8 @@ impl SearchApp {
                         })
                 };
                 // Sync the text input for display
-                self.filters.executor_filter_input = self
-                    .filters
-                    .executor_type
-                    .clone()
-                    .unwrap_or_default();
+                self.filters.executor_filter_input =
+                    self.filters.executor_type.clone().unwrap_or_default();
 
                 self.dialog = DialogState::None;
                 // Reset to page 1 on new filter
@@ -361,8 +358,11 @@ impl SearchApp {
             // Executor selector: Up/Down cycles through options
             KeyCode::Up if self.filters.focus_index == 4 => {
                 let total = self.filters.executors.len() + 1; // +1 for "All"
-                self.filters.executor_sel =
-                    if self.filters.executor_sel == 0 { total - 1 } else { self.filters.executor_sel - 1 };
+                self.filters.executor_sel = if self.filters.executor_sel == 0 {
+                    total - 1
+                } else {
+                    self.filters.executor_sel - 1
+                };
             }
             KeyCode::Down if self.filters.focus_index == 4 => {
                 let total = self.filters.executors.len() + 1;
