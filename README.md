@@ -117,9 +117,10 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - **Auto-detection** — identifies commands from Claude Code, Codex, Aider, VS Code, Cursor, Windsurf, and more
 - **Risk assessment** — every agent command classified as Critical, High, Medium, Low, or Safe
 - **Agent dashboard** — real-time TUI with timeline, risk indicators, and detail pane
+- **Prompt Explorer** — browse agent prompts and drill into the commands they triggered (`suv agent prompts` or `p` in dashboard)
 - **Agent stats** — per-agent analytics with top commands, directories, and risk breakdown
 - **Agent report** — export activity as text, markdown, or JSON
-- **Claude Code integration** — `suv init claude-code` captures AI-executed commands via PostToolUse hook
+- **Claude Code integration** — `suv init claude-code` captures AI-executed commands via PostToolUse and PostToolUseFailure hooks
 - **OpenCode integration** — `suv init opencode` installs a plugin for automatic command capture
 - **Custom agent config** — define detection rules for any agent via `suv settings` → Agents tab
 
@@ -154,7 +155,7 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - **Smart suggestions** — `suv alias add-suggested` opens an interactive picker based on history analysis
 
 ### Session Timeline
-- **`suv session`** — interactive TUI with session picker, command-level detail, scroll, and filter
+- **`suv session`** — interactive TUI with session picker, live search, date/tag filters, command-level detail, scroll, and navigation
 
 ### Garbage Collection
 - **`suv gc`** — remove orphaned tags and sessions, then compact the database with VACUUM
@@ -358,6 +359,11 @@ suv agent dashboard
 suv agent dashboard --executor claude-code
 suv agent dashboard --after yesterday --here
 
+# Browse prompts and the commands they triggered
+suv agent prompts
+suv agent prompts --executor claude-code
+suv agent prompts --after yesterday
+
 # Per-agent analytics — breakdown cards, top commands, risk table
 suv agent stats
 suv agent stats --days 7
@@ -377,6 +383,7 @@ suv agent report --format json | jq .
 | `1` / `2` / `3` / `4` | Period: 7d / 30d / 90d / All |
 | `a` | Cycle agent filter |
 | `r` | Toggle risk-only filter (medium+ risk) |
+| `p` | Open Prompt Explorer |
 | `Ctrl+Y` | Copy selected command to clipboard |
 | `q` / `Esc` | Quit |
 
@@ -558,7 +565,7 @@ exclusions = ["^ls$", "^pwd$", "^cd$"]
 suv init claude-code
 ```
 
-Installs a PostToolUse hook and configures `~/.claude/settings.json`. Restart Claude Code after setup.
+Installs PostToolUse and PostToolUseFailure hooks and configures `~/.claude/settings.json`. Captures both successful and failed commands with exit codes. Restart Claude Code after setup.
 
 ### Cursor
 
@@ -670,6 +677,7 @@ Shell hooks use native `$EPOCHREALTIME` (Zsh 5.1+ / Bash 5+) for millisecond-pre
 | **Agent Monitoring** | |
 | `suv agent dashboard` | Interactive agent monitoring TUI |
 | `suv agent dashboard --executor claude-code` | Filter to one agent |
+| `suv agent prompts` | Browse agent prompts and their commands |
 | `suv agent stats` | Per-agent analytics and risk breakdown |
 | `suv agent report` | Export agent activity report (text) |
 | `suv agent report --format markdown` | Export as markdown |

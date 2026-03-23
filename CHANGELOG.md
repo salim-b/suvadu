@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2026-03-23
+
+### Added
+- **Prompt Explorer** — new two-screen TUI (`suv agent prompts` or press `p` in the agent dashboard) to browse agent prompts and drill into the commands they triggered. Right-side preview shows full prompt text, session, executor, path, timestamps, and success/fail stats. Supports `Ctrl+Y` to copy commands and `s` to jump to session timeline.
+- **`suv agent prompts` CLI** — direct shortcut to launch the Prompt Explorer with `--after`, `--executor`, and `--here` flags.
+- **PostToolUseFailure hook** — captures failed Claude Code commands with parsed exit codes. Run `suv init claude-code` to install the new hook.
+- **Executor selector in search filter** — the executor field (`Ctrl+F` → field 5) is now an Up/Down selector showing actual executors from the database instead of free-text input.
+- **Session picker improvements** — live search bar (type to filter by session ID or tag), `Ctrl+F` filter popup with Tag/Start Date/End Date fields (matching `suv search` design), full session ID display (40% width), first/last command timestamps.
+- **Session timeline header** — shows full session ID and first/last command timestamps on two lines.
+- **Alias resolution in Top Programs** — `suv stats` resolves shell aliases in the Top Programs breakdown. Fixes #11.
+
+### Fixed
+- **Dead text bug** (`suv search` standalone) — added `suv()` shell function wrapper that uses `print -z` (zsh) / `history -s` (bash) to inject the selected command into the editing buffer instead of printing it as dead text. Also hardened ZLE widgets with `emulate -L zsh`, `LBUFFER`/`RBUFFER`, and quoted command substitutions. Fixes #6.
+- **Claude Code exit codes** — `PostToolUse` now defaults to exit code 0 (the hook only fires on success). Previously all agent commands were stored with NULL exit codes.
+- **Missing recent entries in agent views** — `load_entries` no longer truncates recent agent entries when total entry count exceeds the 10k SQL limit.
+- **Session ID display** — strip agent prefixes (`claude-`, `opencode-`, `cursor-`) before truncating for display.
+
+### Changed
+- **Prompt stats** — `None` exit codes (common for agent commands) are treated as unknown, not failed. Status column shows `✔N ✘N` counts instead of a misleading percentage.
+
 ## [0.1.4] - 2026-03-17
 
 ### Added
