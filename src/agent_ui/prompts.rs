@@ -43,6 +43,8 @@ struct PromptGroup {
     session_id: String,
     prompt: String,
     executor: String,
+    /// Most common working directory across entries in this group.
+    cwd: String,
     cmd_count: usize,
     success_count: usize,
     fail_count: usize,
@@ -58,6 +60,7 @@ struct PromptGroupBuilder {
     session_id: String,
     prompt: String,
     executor: String,
+    cwd_counts: HashMap<String, usize>,
     cmd_count: usize,
     success_count: usize,
     fail_count: usize,
@@ -73,6 +76,7 @@ impl PromptGroupBuilder {
             session_id,
             prompt,
             executor,
+            cwd_counts: HashMap::new(),
             cmd_count: 0,
             success_count: 0,
             fail_count: 0,
@@ -85,10 +89,11 @@ impl PromptGroupBuilder {
 
     fn add(&mut self, idx: usize, entry: &Entry) {
         self.cmd_count += 1;
+        *self.cwd_counts.entry(entry.cwd.clone()).or_default() += 1;
         match entry.exit_code {
             Some(0) => self.success_count += 1,
             Some(_) => self.fail_count += 1,
-            None => {} // unknown — don't count as success or fail
+            None => {}
         }
         self.total_duration_ms += entry.duration_ms;
         if entry.started_at < self.first_at {
@@ -101,10 +106,16 @@ impl PromptGroupBuilder {
     }
 
     fn finish(self) -> PromptGroup {
+        let cwd = self
+            .cwd_counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map_or_else(String::new, |(path, _)| path);
         PromptGroup {
             session_id: self.session_id,
             prompt: self.prompt,
             executor: self.executor,
+            cwd,
             cmd_count: self.cmd_count,
             success_count: self.success_count,
             fail_count: self.fail_count,
@@ -465,7 +476,7 @@ impl<'a> PromptExplorerApp<'a> {
             // Re-borrow after render_list_table (which takes &mut self)
             let group = &self.groups
                 [(self.list_page - 1) * PAGE_SIZE + self.list_table.selected().unwrap_or(0)];
-            Self::render_prompt_preview(f, body_chunks[1], t, group);
+            Self::render_prompt_preview(f, body_chunks[1], t, group, &self.home);
         } else {
             self.render_list_table(f, chunks[1], t);
         }
@@ -612,6 +623,7 @@ impl<'a> PromptExplorerApp<'a> {
         area: Rect,
         t: &crate::theme::Theme,
         group: &PromptGroup,
+        home: &str,
     ) {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -632,7 +644,7 @@ impl<'a> PromptExplorerApp<'a> {
 
         // Full prompt text
         let prompt_chars: Vec<char> = group.prompt.chars().collect();
-        let available_h = inner.height.saturating_sub(8) as usize; // reserve for session/executor/time/stats
+        let available_h = inner.height.saturating_sub(9) as usize; // reserve for session/executor/path/time/stats
         for chunk in prompt_chars.chunks(max_w.max(1)).take(available_h.max(1)) {
             let chunk_str: String = chunk.iter().collect();
             lines.push(Line::from(Span::styled(
@@ -670,6 +682,21 @@ impl<'a> PromptExplorerApp<'a> {
             Span::styled(
                 group.executor.clone(),
                 Style::default().fg(t.badge_executor),
+            ),
+        ]));
+
+        // Path
+        let path_display = shorten_path(&group.cwd, home);
+        lines.push(Line::from(vec![
+            Span::styled(
+                " Path     ",
+                Style::default()
+                    .fg(t.text_secondary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                path_display,
+                Style::default().fg(t.badge_path),
             ),
         ]));
 
