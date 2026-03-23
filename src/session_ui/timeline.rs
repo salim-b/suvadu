@@ -223,8 +223,8 @@ impl SessionApp {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // header
-                Constraint::Min(8),    // body
+                Constraint::Length(2), // header
+                Constraint::Min(6),    // body
                 Constraint::Length(1), // footer
             ])
             .split(f.area());
@@ -246,15 +246,15 @@ impl SessionApp {
     }
 
     fn render_header(&self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {
-        let id_short: String = self.session.id.chars().take(8).collect();
-
-        let session_time = Local
-            .timestamp_millis_opt(crate::util::normalize_display_ms(self.session.created_at))
-            .single()
-            .map_or_else(
-                || "??".to_string(),
-                |dt| dt.format("%Y-%m-%d %H:%M").to_string(),
-            );
+        let fmt_ts = |ms: i64| -> String {
+            Local
+                .timestamp_millis_opt(crate::util::normalize_display_ms(ms))
+                .single()
+                .map_or_else(
+                    || "??".to_string(),
+                    |dt| dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+                )
+        };
 
         let total = self.entries.len();
         let success = self
@@ -268,46 +268,74 @@ impl SessionApp {
             .last()
             .map_or(0, |last| last.ended_at - self.entries[0].started_at);
 
-        let mut spans = vec![
+        let first_at = self.entries.first().map(|e| e.started_at);
+        let last_at = self.entries.last().map(|e| e.started_at);
+
+        // Line 1: title + session ID + hostname + tag + stats
+        let mut line1_spans = vec![
             Span::styled(
                 " SESSION TIMELINE ",
                 Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
             ),
             Span::styled("  ", Style::default()),
             Span::styled(
-                format!("{id_short}  "),
+                format!("{}  ", self.session.id),
                 Style::default().fg(t.info).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("{}  ", self.session.hostname),
                 Style::default().fg(t.text_secondary),
             ),
-            Span::styled(
-                format!("{session_time}  "),
-                Style::default().fg(t.text_muted),
-            ),
         ];
 
         if let Some(ref tag) = self.tag_name {
-            spans.push(Span::styled(
+            line1_spans.push(Span::styled(
                 format!("{tag}  "),
                 Style::default().fg(t.primary),
             ));
         }
 
-        spans.push(Span::styled(
+        line1_spans.push(Span::styled(
             format!("{total} cmds  {success}✓  {}✗", total - success),
             Style::default().fg(t.text_secondary),
         ));
 
         if span_ms > 0 {
-            spans.push(Span::styled(
+            line1_spans.push(Span::styled(
                 format!("  {}", format_duration_ms(span_ms)),
                 Style::default().fg(t.text_muted),
             ));
         }
 
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        // Line 2: first/last command timestamps
+        let mut line2_spans = vec![Span::styled("  ", Style::default())];
+        if let Some(first) = first_at {
+            line2_spans.push(Span::styled(
+                "First ",
+                Style::default()
+                    .fg(t.text_secondary)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            line2_spans.push(Span::styled(
+                format!("{}  ", fmt_ts(first)),
+                Style::default().fg(t.text_muted),
+            ));
+        }
+        if let Some(last) = last_at {
+            line2_spans.push(Span::styled(
+                "Last ",
+                Style::default()
+                    .fg(t.text_secondary)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            line2_spans.push(Span::styled(
+                fmt_ts(last),
+                Style::default().fg(t.text_muted),
+            ));
+        }
+
+        let lines = vec![Line::from(line1_spans), Line::from(line2_spans)];
+        f.render_widget(Paragraph::new(lines), area);
     }
 
     fn render_table(&mut self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {

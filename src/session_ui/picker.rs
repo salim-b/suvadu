@@ -1,72 +1,197 @@
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::backend::Backend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, TableState,
+};
 use ratatui::Terminal;
 
 use crate::models::SessionSummary;
 use crate::theme::theme;
-use crate::util::format_duration_ms;
+use crate::util::{self, format_duration_ms};
 
 use chrono::{Local, TimeZone};
 
+// ── Filter state ────────────────────────────────────────────
+
+const NUM_FILTER_FIELDS: usize = 3;
+
+struct PickerFilter {
+    // Live search (session ID / tag — always active)
+    search: String,
+
+    // Filter popup inputs
+    tag_input: String,
+    start_date_input: String,
+    end_date_input: String,
+    focus_index: usize, // 0=tag, 1=start date, 2=end date
+    popup_open: bool,
+
+    // Applied filter values
+    tag_query: String,
+    after_ms: Option<i64>,
+    before_ms: Option<i64>,
+}
+
+impl Default for PickerFilter {
+    fn default() -> Self {
+        Self {
+            search: String::new(),
+            tag_input: String::new(),
+            start_date_input: String::new(),
+            end_date_input: String::new(),
+            focus_index: 0,
+            popup_open: false,
+            tag_query: String::new(),
+            after_ms: None,
+            before_ms: None,
+        }
+    }
+}
+
+// ── App ─────────────────────────────────────────────────────
+
 struct PickerApp {
     sessions: Vec<SessionSummary>,
+    visible: Vec<usize>,
     table_state: TableState,
+    filter: PickerFilter,
 }
 
 impl PickerApp {
     fn new(sessions: Vec<SessionSummary>) -> Self {
+        let visible: Vec<usize> = (0..sessions.len()).collect();
         let mut table_state = TableState::default();
-        if !sessions.is_empty() {
+        if !visible.is_empty() {
             table_state.select(Some(0));
         }
         Self {
             sessions,
+            visible,
             table_state,
+            filter: PickerFilter::default(),
         }
     }
 
+    fn rebuild_visible(&mut self) {
+        let search = self.filter.search.to_lowercase();
+        let tq = &self.filter.tag_query;
+        let after = self.filter.after_ms;
+        let before = self.filter.before_ms;
+
+        self.visible = self
+            .sessions
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                // Live search: match session ID or tag
+                let search_ok = search.is_empty()
+                    || s.id.to_lowercase().contains(&search)
+                    || s.tag_name
+                        .as_deref()
+                        .is_some_and(|t| t.to_lowercase().contains(&search));
+
+                // Tag filter (from popup)
+                let tag_ok = tq.is_empty()
+                    || s.tag_name
+                        .as_deref()
+                        .is_some_and(|t| t.to_lowercase().contains(tq));
+
+                // Date range: session has any command in the range
+                // (first_cmd_at..=last_cmd_at overlaps with after..=before)
+                let after_ok = after.map_or(true, |ms| s.last_cmd_at >= ms);
+                let before_ok = before.map_or(true, |ms| s.first_cmd_at <= ms);
+
+                search_ok && tag_ok && after_ok && before_ok
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        if self.visible.is_empty() {
+            self.table_state.select(None);
+        } else {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    fn active_filter_count(&self) -> usize {
+        let mut n = 0;
+        if !self.filter.tag_query.is_empty() {
+            n += 1;
+        }
+        if self.filter.after_ms.is_some() {
+            n += 1;
+        }
+        if self.filter.before_ms.is_some() {
+            n += 1;
+        }
+        n
+    }
+
+    fn clear_filters(&mut self) {
+        self.filter.tag_input.clear();
+        self.filter.start_date_input.clear();
+        self.filter.end_date_input.clear();
+        self.filter.tag_query.clear();
+        self.filter.after_ms = None;
+        self.filter.before_ms = None;
+        self.rebuild_visible();
+    }
+
     fn next(&mut self) {
-        if self.sessions.is_empty() {
+        if self.visible.is_empty() {
             return;
         }
         let i = self
             .table_state
             .selected()
-            .map_or(0, |i| (i + 1) % self.sessions.len());
+            .map_or(0, |i| (i + 1) % self.visible.len());
         self.table_state.select(Some(i));
     }
 
     fn prev(&mut self) {
-        if self.sessions.is_empty() {
+        if self.visible.is_empty() {
             return;
         }
         let i = self.table_state.selected().map_or(0, |i| {
             if i > 0 {
                 i - 1
             } else {
-                self.sessions.len() - 1
+                self.visible.len() - 1
             }
         });
         self.table_state.select(Some(i));
     }
+
+    fn selected_session_id(&self) -> Option<&str> {
+        self.table_state
+            .selected()
+            .and_then(|i| self.visible.get(i))
+            .map(|&idx| self.sessions[idx].id.as_str())
+    }
 }
+
+// ── Rendering ───────────────────────────────────────────────
 
 impl PickerApp {
     #[allow(clippy::cast_precision_loss)]
     fn build_session_row<'a>(s: &SessionSummary, t: &crate::theme::Theme) -> Row<'a> {
-        let time = Local
-            .timestamp_millis_opt(crate::util::normalize_display_ms(s.created_at))
-            .single()
-            .map_or_else(
-                || "????-??-?? ??:??".into(),
-                |dt| dt.format("%Y-%m-%d %H:%M").to_string(),
-            );
+        let fmt_ts = |ms: i64| -> String {
+            Local
+                .timestamp_millis_opt(crate::util::normalize_display_ms(ms))
+                .single()
+                .map_or_else(
+                    || "??-?? ??:??".into(),
+                    |dt| dt.format("%m-%d %H:%M").to_string(),
+                )
+        };
+
+        let first_cmd = fmt_ts(s.first_cmd_at);
+        let last_cmd = fmt_ts(s.last_cmd_at);
 
         let tag_str = s
             .tag_name
@@ -92,14 +217,22 @@ impl PickerApp {
             "—".into()
         };
 
-        let id_short: String = s.id.chars().take(8).collect();
+        let id_display: String = s
+            .id
+            .strip_prefix("claude-")
+            .or_else(|| s.id.strip_prefix("opencode-"))
+            .or_else(|| s.id.strip_prefix("cursor-"))
+            .unwrap_or(&s.id)
+            .to_string();
 
         Row::new(vec![
-            Cell::from(time).style(Style::default().fg(t.text_muted)),
-            Cell::from(id_short).style(Style::default().fg(t.info).add_modifier(Modifier::BOLD)),
-            Cell::from(s.hostname.clone()).style(Style::default().fg(t.text)),
+            Cell::from(id_display)
+                .style(Style::default().fg(t.info).add_modifier(Modifier::BOLD)),
             Cell::from(tag_str).style(Style::default().fg(t.primary)),
-            Cell::from(format!("{}", s.cmd_count)).style(Style::default().fg(t.text_secondary)),
+            Cell::from(first_cmd).style(Style::default().fg(t.text_muted)),
+            Cell::from(last_cmd).style(Style::default().fg(t.text_muted)),
+            Cell::from(format!("{}", s.cmd_count))
+                .style(Style::default().fg(t.text_secondary)),
             Cell::from(format!("{rate:.0}%")).style(rate_style),
             Cell::from(duration).style(Style::default().fg(t.text_muted)),
         ])
@@ -111,14 +244,57 @@ impl PickerApp {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(2)])
+            .constraints([
+                Constraint::Length(3), // search bar
+                Constraint::Min(5),    // table
+                Constraint::Length(1), // footer
+            ])
             .split(size);
 
-        let header = Row::new(vec![
-            Cell::from("Time"),
-            Cell::from("ID"),
-            Cell::from("Host"),
+        // Search bar (live filtering)
+        let filter_count = self.active_filter_count();
+        let filter_badge = if filter_count > 0 {
+            format!(
+                " [{filter_count} filter{}]",
+                if filter_count > 1 { "s" } else { "" }
+            )
+        } else {
+            String::new()
+        };
+
+        let in_popup = self.filter.popup_open;
+        let search_border = if in_popup { t.border } else { t.border_focus };
+        let search_title = if in_popup {
+            "Search"
+        } else {
+            "Search (Typing)"
+        };
+        let query_display = format!("{}{filter_badge}", self.filter.search);
+        let search_bar = Paragraph::new(query_display)
+            .style(Style::default().fg(t.text))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(search_border))
+                    .title(search_title),
+            );
+        f.render_widget(search_bar, chunks[0]);
+
+        // Table
+        let showing = self.visible.len();
+        let total = self.sessions.len();
+        let title = if self.filter.search.is_empty() && filter_count == 0 {
+            format!(" Sessions ({total}) ")
+        } else {
+            format!(" Sessions ({showing}/{total}) ")
+        };
+
+        let table_header = Row::new(vec![
+            Cell::from("Session"),
             Cell::from("Tag"),
+            Cell::from("First Cmd"),
+            Cell::from("Last Cmd"),
             Cell::from("Cmds"),
             Cell::from("Rate"),
             Cell::from("Duration"),
@@ -131,30 +307,30 @@ impl PickerApp {
         .bottom_margin(1);
 
         let rows: Vec<Row> = self
-            .sessions
+            .visible
             .iter()
-            .map(|s| Self::build_session_row(s, t))
+            .map(|&idx| Self::build_session_row(&self.sessions[idx], t))
             .collect();
 
         let widths = [
-            Constraint::Length(16),
+            Constraint::Percentage(40),
             Constraint::Length(10),
             Constraint::Length(12),
-            Constraint::Length(10),
+            Constraint::Length(12),
             Constraint::Length(6),
             Constraint::Length(5),
             Constraint::Min(7),
         ];
 
         let table = Table::new(rows, widths)
-            .header(header)
+            .header(table_header)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(t.border_focus))
+                    .border_style(Style::default().fg(t.border))
                     .title(Span::styled(
-                        format!(" Sessions ({}) ", self.sessions.len()),
+                        title,
                         Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
                     )),
             )
@@ -166,19 +342,177 @@ impl PickerApp {
             )
             .highlight_symbol(" > ");
 
-        f.render_stateful_widget(table, chunks[0], &mut self.table_state);
+        f.render_stateful_widget(table, chunks[1], &mut self.table_state);
 
-        let footer = Paragraph::new(Line::from(vec![
-            Span::styled(" ↑↓", Style::default().fg(t.info)),
-            Span::styled(" Navigate  ", Style::default().fg(t.text_muted)),
-            Span::styled("Enter", Style::default().fg(t.success)),
-            Span::styled(" Select  ", Style::default().fg(t.text_muted)),
-            Span::styled("q", Style::default().fg(t.error)),
-            Span::styled(" Quit", Style::default().fg(t.text_muted)),
-        ]));
-        f.render_widget(footer, chunks[1]);
+        if self.visible.is_empty() && !self.sessions.is_empty() {
+            let hint = Paragraph::new(Span::styled(
+                "  No sessions match. Clear search or filters.",
+                Style::default().fg(t.text_muted),
+            ));
+            let hint_area = Rect {
+                x: chunks[1].x + 2,
+                y: chunks[1].y + 3,
+                width: chunks[1].width.saturating_sub(4),
+                height: 1,
+            };
+            f.render_widget(hint, hint_area);
+        }
+
+        // Footer
+        let badge_key = Style::default()
+            .fg(t.bg_elevated)
+            .bg(t.text_secondary)
+            .add_modifier(Modifier::BOLD);
+        let badge_label = Style::default().fg(t.text_muted);
+
+        let mut footer_spans = vec![
+            Span::styled(" ↑↓ ", badge_key),
+            Span::styled(" Navigate  ", badge_label),
+            Span::styled(" Enter ", badge_key),
+            Span::styled(" Open  ", badge_label),
+            Span::styled(" ^F ", badge_key),
+            Span::styled(" Filter  ", badge_label),
+        ];
+        if filter_count > 0 {
+            footer_spans.push(Span::styled(" ^X ", badge_key));
+            footer_spans.push(Span::styled(" Clear  ", badge_label));
+        }
+        footer_spans.push(Span::styled(" Esc ", badge_key));
+        footer_spans.push(Span::styled(" Quit  ", badge_label));
+
+        f.render_widget(Paragraph::new(Line::from(footer_spans)), chunks[2]);
+
+        // Filter popup overlay
+        if self.filter.popup_open {
+            self.render_filter_popup(f, size);
+        }
+    }
+
+    fn render_filter_popup(&self, f: &mut ratatui::Frame, area: Rect) {
+        let t = theme();
+
+        let block = Block::default()
+            .title(" Filters ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(t.primary).add_modifier(Modifier::BOLD))
+            .style(Style::default().bg(t.bg_elevated));
+
+        let popup_height = 16u16.min(area.height.saturating_sub(2));
+        let popup_width = (area.width * 50 / 100).max(30).min(area.width);
+        let popup_area = Rect {
+            x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+            y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+            width: popup_width,
+            height: popup_height,
+        };
+        f.render_widget(Clear, popup_area);
+        f.render_widget(block, popup_area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(2)
+            .constraints([
+                Constraint::Length(1), // Progress
+                Constraint::Length(3), // Tag
+                Constraint::Length(3), // Start Date
+                Constraint::Length(3), // End Date
+                Constraint::Min(0),    // Help
+            ])
+            .split(popup_area);
+
+        // Progress
+        self.render_filter_progress(f, chunks[0]);
+
+        // Fields
+        let fields: [(&str, &str, &str); NUM_FILTER_FIELDS] = [
+            (
+                "Tag Name",
+                &self.filter.tag_input,
+                "e.g. work, personal",
+            ),
+            (
+                "Start Date (After)",
+                &self.filter.start_date_input,
+                "e.g. today, yesterday, 2024-01-15",
+            ),
+            (
+                "End Date (Before)",
+                &self.filter.end_date_input,
+                "e.g. today, yesterday, 2024-12-31",
+            ),
+        ];
+
+        for (i, (title, value, hint)) in fields.iter().enumerate() {
+            let is_focused = self.filter.focus_index == i;
+            let border_color = if is_focused { t.border_focus } else { t.border };
+            let text_color = if is_focused { t.text } else { t.text_secondary };
+
+            let display_text = if value.is_empty() && !is_focused {
+                hint.to_string()
+            } else {
+                value.to_string()
+            };
+
+            let text_style = if value.is_empty() && !is_focused {
+                Style::default().fg(t.text_muted)
+            } else {
+                Style::default().fg(text_color)
+            };
+
+            let input = Paragraph::new(display_text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(border_color))
+                        .title(format!(
+                            "{title}{}",
+                            if is_focused { " *" } else { "" }
+                        )),
+                )
+                .style(text_style);
+            f.render_widget(input, chunks[i + 1]);
+        }
+
+        // Help
+        let help_text =
+            Paragraph::new("Tab/S-Tab: switch fields  |  Enter: apply  |  Esc: cancel")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(t.text_muted));
+        f.render_widget(help_text, chunks[4]);
+    }
+
+    fn render_filter_progress(&self, f: &mut ratatui::Frame, area: Rect) {
+        let t = theme();
+        let focus = self.filter.focus_index;
+        let mut spans: Vec<Span> = (0..NUM_FILTER_FIELDS)
+            .map(|i| {
+                if i == focus {
+                    Span::styled(" ■ ", Style::default().fg(t.primary))
+                } else {
+                    Span::styled(" □ ", Style::default().fg(t.text_muted))
+                }
+            })
+            .collect();
+        let names = ["Tag", "Start Date", "End Date"];
+        spans.push(Span::styled(
+            format!(
+                "  Field {} of {}: {}",
+                focus + 1,
+                NUM_FILTER_FIELDS,
+                names[focus]
+            ),
+            Style::default().fg(t.text_secondary),
+        ));
+        f.render_widget(
+            Paragraph::new(Line::from(spans)).alignment(Alignment::Center),
+            area,
+        );
     }
 }
+
+// ── Tests ───────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -194,6 +528,13 @@ mod tests {
             success_count: cmd_count,
             first_cmd_at: 1_700_000_000_000,
             last_cmd_at: 1_700_000_060_000,
+        }
+    }
+
+    fn make_summary_tagged(id: &str, tag: &str) -> SessionSummary {
+        SessionSummary {
+            tag_name: Some(tag.to_string()),
+            ..make_summary(id, 5)
         }
     }
 
@@ -215,7 +556,7 @@ mod tests {
         assert_eq!(app.table_state.selected(), Some(0));
         app.next();
         assert_eq!(app.table_state.selected(), Some(1));
-        app.next(); // wraps
+        app.next();
         assert_eq!(app.table_state.selected(), Some(0));
     }
 
@@ -223,7 +564,7 @@ mod tests {
     fn prev_wraps_around() {
         let mut app = PickerApp::new(vec![make_summary("s1", 5), make_summary("s2", 3)]);
         assert_eq!(app.table_state.selected(), Some(0));
-        app.prev(); // wraps to last
+        app.prev();
         assert_eq!(app.table_state.selected(), Some(1));
         app.prev();
         assert_eq!(app.table_state.selected(), Some(0));
@@ -232,14 +573,14 @@ mod tests {
     #[test]
     fn next_on_empty_does_nothing() {
         let mut app = PickerApp::new(vec![]);
-        app.next(); // should not panic
+        app.next();
         assert!(app.table_state.selected().is_none());
     }
 
     #[test]
     fn prev_on_empty_does_nothing() {
         let mut app = PickerApp::new(vec![]);
-        app.prev(); // should not panic
+        app.prev();
         assert!(app.table_state.selected().is_none());
     }
 
@@ -256,7 +597,156 @@ mod tests {
         app.prev();
         assert_eq!(app.table_state.selected(), Some(0));
     }
+
+    // ── Live search tests ───────────────────────────────────
+
+    #[test]
+    fn search_filters_by_session_id() {
+        let mut app = PickerApp::new(vec![
+            make_summary("claude-abc123", 5),
+            make_summary("opencode-xyz", 3),
+            make_summary("claude-abc999", 2),
+        ]);
+        app.filter.search = "abc".to_string();
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 2);
+    }
+
+    #[test]
+    fn search_filters_by_tag() {
+        let mut app = PickerApp::new(vec![
+            make_summary_tagged("s1", "work"),
+            make_summary("s2", 3),
+        ]);
+        app.filter.search = "work".to_string();
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 1);
+    }
+
+    #[test]
+    fn search_empty_shows_all() {
+        let mut app = PickerApp::new(vec![make_summary("s1", 5), make_summary("s2", 3)]);
+        app.filter.search.clear();
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 2);
+    }
+
+    // ── Filter popup tests ──────────────────────────────────
+
+    #[test]
+    fn filter_tag_narrows_results() {
+        let mut app = PickerApp::new(vec![
+            make_summary_tagged("s1", "work"),
+            make_summary("s2", 3),
+            make_summary_tagged("s3", "personal"),
+        ]);
+        app.filter.tag_query = "work".to_string();
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 1);
+        assert_eq!(app.sessions[app.visible[0]].id, "s1");
+    }
+
+    #[test]
+    fn filter_after_date_narrows_results() {
+        let mut app = PickerApp::new(vec![
+            make_summary("s1", 5), // last_cmd_at = 1_700_000_060_000
+            make_summary("s2", 3),
+        ]);
+        // After timestamp beyond all sessions
+        app.filter.after_ms = Some(1_800_000_000_000);
+        app.rebuild_visible();
+        assert!(app.visible.is_empty());
+
+        // After before sessions — shows all
+        app.filter.after_ms = Some(1_600_000_000_000);
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 2);
+    }
+
+    #[test]
+    fn filter_before_date_narrows_results() {
+        let mut app = PickerApp::new(vec![
+            make_summary("s1", 5), // first_cmd_at = 1_700_000_000_000
+            make_summary("s2", 3),
+        ]);
+        // Before timestamp before all sessions
+        app.filter.before_ms = Some(1_600_000_000_000);
+        app.rebuild_visible();
+        assert!(app.visible.is_empty());
+
+        // Before after sessions — shows all
+        app.filter.before_ms = Some(1_800_000_000_000);
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 2);
+    }
+
+    #[test]
+    fn filter_date_range_overlap() {
+        let mut app = PickerApp::new(vec![
+            make_summary("s1", 5), // first=1_700_000_000_000, last=1_700_000_060_000
+        ]);
+        // Range that overlaps with session
+        app.filter.after_ms = Some(1_700_000_030_000);
+        app.filter.before_ms = Some(1_700_000_090_000);
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 1); // session has cmds in range
+    }
+
+    #[test]
+    fn search_and_filter_combine() {
+        let mut app = PickerApp::new(vec![
+            make_summary_tagged("claude-abc", "work"),
+            make_summary_tagged("claude-xyz", "work"),
+            make_summary_tagged("claude-abc", "personal"),
+        ]);
+        app.filter.search = "abc".to_string();
+        app.filter.tag_query = "work".to_string();
+        app.rebuild_visible();
+        assert_eq!(app.visible.len(), 1);
+    }
+
+    #[test]
+    fn clear_filters_resets_all() {
+        let mut app = PickerApp::new(vec![make_summary("s1", 5)]);
+        app.filter.tag_query = "zzz".to_string();
+        app.filter.after_ms = Some(9_999_999_999_999);
+        app.filter.before_ms = Some(1);
+        app.rebuild_visible();
+        assert!(app.visible.is_empty());
+
+        app.clear_filters();
+        assert_eq!(app.visible.len(), 1);
+        assert!(app.filter.tag_query.is_empty());
+        assert!(app.filter.after_ms.is_none());
+        assert!(app.filter.before_ms.is_none());
+    }
+
+    #[test]
+    fn active_filter_count_works() {
+        let mut app = PickerApp::new(vec![]);
+        assert_eq!(app.active_filter_count(), 0);
+        app.filter.tag_query = "work".to_string();
+        assert_eq!(app.active_filter_count(), 1);
+        app.filter.after_ms = Some(123);
+        assert_eq!(app.active_filter_count(), 2);
+        app.filter.before_ms = Some(456);
+        assert_eq!(app.active_filter_count(), 3);
+    }
+
+    #[test]
+    fn selected_session_id_returns_correct() {
+        let app = PickerApp::new(vec![make_summary("s1", 5), make_summary("s2", 3)]);
+        assert_eq!(app.selected_session_id(), Some("s1"));
+    }
+
+    #[test]
+    fn selected_session_id_empty() {
+        let app = PickerApp::new(vec![]);
+        assert_eq!(app.selected_session_id(), None);
+    }
 }
+
+// ── Public entry point ──────────────────────────────────────
 
 pub fn run_session_picker<B: Backend>(
     terminal: &mut Terminal<B>,
@@ -274,18 +764,111 @@ where
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => return Ok(None),
-                KeyCode::Enter => {
-                    return Ok(app
-                        .table_state
-                        .selected()
-                        .and_then(|i| app.sessions.get(i))
-                        .map(|s| s.id.clone()));
+
+            if app.filter.popup_open {
+                // Filter popup mode
+                match key.code {
+                    KeyCode::Esc => {
+                        app.filter.popup_open = false;
+                        // Discard pending edits — restore from applied values
+                        app.filter.tag_input = app.filter.tag_query.clone();
+                        app.filter.start_date_input = app.filter.after_ms
+                            .map_or_else(String::new, |_| app.filter.start_date_input.clone());
+                        app.filter.end_date_input = app.filter.before_ms
+                            .map_or_else(String::new, |_| app.filter.end_date_input.clone());
+                    }
+                    KeyCode::Tab => {
+                        app.filter.focus_index =
+                            (app.filter.focus_index + 1) % NUM_FILTER_FIELDS;
+                    }
+                    KeyCode::BackTab => {
+                        app.filter.focus_index = if app.filter.focus_index == 0 {
+                            NUM_FILTER_FIELDS - 1
+                        } else {
+                            app.filter.focus_index - 1
+                        };
+                    }
+                    KeyCode::Enter => {
+                        // Apply filters
+                        app.filter.tag_query =
+                            app.filter.tag_input.trim().to_lowercase();
+                        app.filter.after_ms = if app.filter.start_date_input.is_empty() {
+                            None
+                        } else {
+                            util::parse_date_input(&app.filter.start_date_input, false)
+                        };
+                        app.filter.before_ms = if app.filter.end_date_input.is_empty() {
+                            None
+                        } else {
+                            util::parse_date_input(&app.filter.end_date_input, true)
+                        };
+                        app.filter.popup_open = false;
+                        app.rebuild_visible();
+                    }
+                    KeyCode::Backspace => match app.filter.focus_index {
+                        0 => { app.filter.tag_input.pop(); }
+                        1 => { app.filter.start_date_input.pop(); }
+                        2 => { app.filter.end_date_input.pop(); }
+                        _ => {}
+                    },
+                    KeyCode::Char(c) => match app.filter.focus_index {
+                        0 => app.filter.tag_input.push(c),
+                        1 => app.filter.start_date_input.push(c),
+                        2 => app.filter.end_date_input.push(c),
+                        _ => {}
+                    },
+                    _ => {}
                 }
-                KeyCode::Down | KeyCode::Char('j') => app.next(),
-                KeyCode::Up | KeyCode::Char('k') => app.prev(),
-                _ => {}
+            } else {
+                // Normal mode — typing goes to live search
+                match key.code {
+                    KeyCode::Esc => {
+                        if !app.filter.search.is_empty() {
+                            app.filter.search.clear();
+                            app.rebuild_visible();
+                        } else {
+                            return Ok(None);
+                        }
+                    }
+                    KeyCode::Char('q') if app.filter.search.is_empty() => {
+                        return Ok(None);
+                    }
+                    KeyCode::Enter => {
+                        return Ok(app.selected_session_id().map(String::from));
+                    }
+                    KeyCode::Down | KeyCode::Char('j')
+                        if app.filter.search.is_empty() =>
+                    {
+                        app.next();
+                    }
+                    KeyCode::Up | KeyCode::Char('k')
+                        if app.filter.search.is_empty() =>
+                    {
+                        app.prev();
+                    }
+                    KeyCode::Down => app.next(),
+                    KeyCode::Up => app.prev(),
+                    KeyCode::Char('f')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        app.filter.popup_open = true;
+                        app.filter.focus_index = 0;
+                    }
+                    KeyCode::Char('x')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        app.clear_filters();
+                    }
+                    KeyCode::Backspace => {
+                        app.filter.search.pop();
+                        app.rebuild_visible();
+                    }
+                    KeyCode::Char(c) => {
+                        app.filter.search.push(c);
+                        app.rebuild_visible();
+                    }
+                    _ => {}
+                }
             }
         }
     }
