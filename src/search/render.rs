@@ -717,7 +717,8 @@ impl SearchApp {
 
     fn render_filter_fields(&self, f: &mut ratatui::Frame, chunks: &[Rect]) {
         let t = theme();
-        let fields: Vec<(&str, &str, &str)> = vec![
+        // Text input fields (0..=3)
+        let text_fields: Vec<(&str, &str, &str)> = vec![
             (
                 "Start Date (After)",
                 &self.filters.start_date_input,
@@ -738,14 +739,9 @@ impl SearchApp {
                 &self.filters.exit_code_input,
                 "e.g. 0 (success), 1 (failure)",
             ),
-            (
-                "Executor",
-                &self.filters.executor_filter_input,
-                "e.g. human, agent, ide, ci, vscode",
-            ),
         ];
 
-        for (i, (title, value, hint)) in fields.iter().enumerate() {
+        for (i, (title, value, hint)) in text_fields.iter().enumerate() {
             let is_focused = self.filters.focus_index == i;
             let border_color = if is_focused { t.border_focus } else { t.border };
             let text_color = if is_focused { t.text } else { t.text_secondary };
@@ -773,12 +769,72 @@ impl SearchApp {
                 .style(text_style);
             f.render_widget(input, chunks[i + 1]);
         }
+
+        // Executor selector (field 4)
+        let is_exec_focused = self.filters.focus_index == 4;
+        let exec_border = if is_exec_focused { t.border_focus } else { t.border };
+        let sel = self.filters.executor_sel;
+        let display = if sel == 0 {
+            "All".to_string()
+        } else {
+            self.filters
+                .executors
+                .get(sel - 1)
+                .cloned()
+                .unwrap_or_else(|| "All".to_string())
+        };
+        let exec_style = if is_exec_focused {
+            Style::default().fg(t.text)
+        } else {
+            Style::default().fg(t.text_secondary)
+        };
+        let hint_suffix = if is_exec_focused { "  ↑↓ to select" } else { "" };
+        let exec_widget = Paragraph::new(format!("  {display}{hint_suffix}"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(exec_border))
+                    .title(format!(
+                        "Executor{}",
+                        if is_exec_focused { " *" } else { "" }
+                    )),
+            )
+            .style(exec_style);
+        f.render_widget(exec_widget, chunks[5]);
     }
 
     /// Compact mode: render only the currently focused filter field.
     fn render_single_filter_field(&self, f: &mut ratatui::Frame, area: Rect) {
         let t = theme();
-        let fields: [(&str, &str, &str); 5] = [
+        let i = self.filters.focus_index.min(4);
+
+        if i == 4 {
+            // Executor selector in compact mode
+            let sel = self.filters.executor_sel;
+            let display = if sel == 0 {
+                "All".to_string()
+            } else {
+                self.filters
+                    .executors
+                    .get(sel - 1)
+                    .cloned()
+                    .unwrap_or_else(|| "All".to_string())
+            };
+            let widget = Paragraph::new(format!("  {display}  ↑↓ to select"))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(t.border_focus))
+                        .title("Executor *"),
+                )
+                .style(Style::default().fg(t.text));
+            f.render_widget(widget, area);
+            return;
+        }
+
+        let fields: [(&str, &str, &str); 4] = [
             (
                 "Start Date (After)",
                 &self.filters.start_date_input,
@@ -799,14 +855,8 @@ impl SearchApp {
                 &self.filters.exit_code_input,
                 "e.g. 0 (success), 1 (failure)",
             ),
-            (
-                "Executor",
-                &self.filters.executor_filter_input,
-                "e.g. human, agent, ide, ci, vscode",
-            ),
         ];
 
-        let i = self.filters.focus_index.min(fields.len() - 1);
         let (title, value, hint) = fields[i];
 
         let display_text = if value.is_empty() {
@@ -1290,6 +1340,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts,
             filter_after: None,
             filter_before: None,
@@ -1369,6 +1420,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -1407,6 +1459,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -1455,6 +1508,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: after,
             filter_before: before,
@@ -1570,6 +1624,7 @@ mod tests {
             page: 2,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -1611,6 +1666,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -1652,6 +1708,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -1919,6 +1976,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -1975,6 +2033,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: HashMap::new(),
             filter_after: None,
             filter_before: None,
@@ -2118,6 +2177,7 @@ mod tests {
             page: 1,
             page_size: 50,
             tags: vec![],
+            executors: vec![],
             unique_counts: std::collections::HashMap::new(),
             filter_after: None,
             filter_before: None,

@@ -80,6 +80,11 @@ pub struct FilterState {
     pub exit_code_input: String,
     pub executor_filter_input: String,
     pub focus_index: usize, // 0=start, 1=end, 2=tag, 3=exit, 4=executor
+
+    // Executor selector (populated from DB on filter open)
+    pub executors: Vec<String>,
+    /// 0 = "All", 1..=N = executor index (offset by 1)
+    pub executor_sel: usize,
 }
 
 /// Pagination state.
@@ -97,6 +102,7 @@ pub struct SearchConfig {
     pub page: usize,
     pub page_size: usize,
     pub tags: Vec<Tag>,
+    pub executors: Vec<String>,
     pub unique_counts: std::collections::HashMap<i64, i64>,
     pub filter_after: Option<i64>,
     pub filter_before: Option<i64>,
@@ -184,6 +190,8 @@ impl SearchApp {
                 exit_code_input: cfg.exit_code_input.unwrap_or_default(),
                 executor_filter_input: cfg.executor_filter_input.unwrap_or_default(),
                 focus_index: 0,
+                executors: cfg.executors,
+                executor_sel: 0,
             },
 
             dialog: DialogState::None,
@@ -447,6 +455,7 @@ pub fn run_search(
 
     let bookmarked_commands = repo.get_bookmarked_commands().unwrap_or_default();
     let noted_entry_ids = repo.get_noted_entry_ids().unwrap_or_default();
+    let executors = repo.get_distinct_executors().unwrap_or_default();
 
     let _guard = crate::util::TerminalGuardStderr::new()?;
     let backend = CrosstermBackend::new(io::stderr());
@@ -459,6 +468,7 @@ pub fn run_search(
         page: 1,
         page_size,
         tags,
+        executors,
         unique_counts,
         filter_after,
         filter_before,

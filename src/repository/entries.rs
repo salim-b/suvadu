@@ -509,6 +509,23 @@ impl Repository {
         Ok(ids)
     }
 
+    /// Get distinct executor labels (e.g. "agent: claude-code", "human: terminal").
+    /// Returns a sorted list of `"type: name"` strings for use in filter UIs.
+    pub fn get_distinct_executors(&self) -> DbResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT
+                COALESCE(executor_type, 'unknown') || ': ' || COALESCE(executor, 'unknown')
+             FROM entries
+             ORDER BY 1",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut executors = Vec::new();
+        for row in rows {
+            executors.push(row?);
+        }
+        Ok(executors)
+    }
+
     /// Run VACUUM to reclaim disk space.
     pub fn vacuum(&self) -> DbResult<()> {
         self.conn.execute_batch("VACUUM")?;

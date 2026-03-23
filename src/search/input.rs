@@ -331,17 +331,42 @@ impl SearchApp {
                     self.filters.exit_code_input.trim().parse::<i32>().ok()
                 };
 
-                // Parse executor filter
-                self.filters.executor_type = if self.filters.executor_filter_input.is_empty() {
-                    None
+                // Apply executor from selector — extract the name part after ": "
+                // e.g. "agent: claude-code" → "claude-code"
+                self.filters.executor_type = if self.filters.executor_sel == 0 {
+                    None // "All"
                 } else {
-                    Some(self.filters.executor_filter_input.trim().to_lowercase())
+                    self.filters
+                        .executors
+                        .get(self.filters.executor_sel - 1)
+                        .map(|label| {
+                            label
+                                .split_once(": ")
+                                .map_or(label.as_str(), |(_, name)| name)
+                                .to_string()
+                        })
                 };
+                // Sync the text input for display
+                self.filters.executor_filter_input = self
+                    .filters
+                    .executor_type
+                    .clone()
+                    .unwrap_or_default();
 
                 self.dialog = DialogState::None;
                 // Reset to page 1 on new filter
                 self.pagination.page = 1;
                 return SearchAction::Reload;
+            }
+            // Executor selector: Up/Down cycles through options
+            KeyCode::Up if self.filters.focus_index == 4 => {
+                let total = self.filters.executors.len() + 1; // +1 for "All"
+                self.filters.executor_sel =
+                    if self.filters.executor_sel == 0 { total - 1 } else { self.filters.executor_sel - 1 };
+            }
+            KeyCode::Down if self.filters.focus_index == 4 => {
+                let total = self.filters.executors.len() + 1;
+                self.filters.executor_sel = (self.filters.executor_sel + 1) % total;
             }
             KeyCode::Backspace => match self.filters.focus_index {
                 0 => {
@@ -356,9 +381,7 @@ impl SearchApp {
                 3 => {
                     self.filters.exit_code_input.pop();
                 }
-                4 => {
-                    self.filters.executor_filter_input.pop();
-                }
+                // field 4 is a selector, no text backspace
                 _ => {}
             },
             KeyCode::Char(c) => match self.filters.focus_index {
@@ -374,9 +397,7 @@ impl SearchApp {
                 3 if self.filters.exit_code_input.len() + c.len_utf8() <= MAX_INPUT_LEN => {
                     self.filters.exit_code_input.push(c);
                 }
-                4 if self.filters.executor_filter_input.len() + c.len_utf8() <= MAX_INPUT_LEN => {
-                    self.filters.executor_filter_input.push(c);
-                }
+                // field 4 is a selector, no text input
                 _ => {}
             },
             _ => {}

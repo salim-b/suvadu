@@ -28,6 +28,7 @@ fn test_search_config(entries: Vec<Entry>, total_items: usize) -> SearchConfig {
         page: 1,
         page_size: 50,
         tags: vec![],
+        executors: vec![],
         unique_counts: std::collections::HashMap::new(),
         filter_after: None,
         filter_before: None,
@@ -1269,10 +1270,16 @@ fn test_filter_typing_each_field() {
     app.handle_input(KeyEvent::from(KeyCode::Char('0')));
     assert!(app.filters.exit_code_input.contains('0'));
 
-    // Field 4: executor_filter_input
+    // Field 4: executor selector (Up/Down cycles, not text input)
     app.filters.focus_index = 4;
-    app.handle_input(KeyEvent::from(KeyCode::Char('h')));
-    assert!(app.filters.executor_filter_input.contains('h'));
+    app.filters.executors = vec!["agent: claude-code".into(), "human: terminal".into()];
+    app.filters.executor_sel = 0; // "All"
+    app.handle_input(KeyEvent::from(KeyCode::Down));
+    assert_eq!(app.filters.executor_sel, 1); // first executor
+    app.handle_input(KeyEvent::from(KeyCode::Down));
+    assert_eq!(app.filters.executor_sel, 2); // second executor
+    app.handle_input(KeyEvent::from(KeyCode::Down));
+    assert_eq!(app.filters.executor_sel, 0); // wraps to "All"
 }
 
 #[test]
@@ -1303,9 +1310,11 @@ fn test_filter_backspace_each_field() {
     app.handle_input(KeyEvent::from(KeyCode::Backspace));
     assert_eq!(app.filters.exit_code_input, "12");
 
+    // Field 4 is a selector — backspace is a no-op
     app.filters.focus_index = 4;
+    app.filters.executor_sel = 1;
     app.handle_input(KeyEvent::from(KeyCode::Backspace));
-    assert_eq!(app.filters.executor_filter_input, "xy");
+    assert_eq!(app.filters.executor_sel, 1); // unchanged
 }
 
 #[test]
@@ -1324,11 +1333,27 @@ fn test_filter_enter_applies_exit_code() {
 fn test_filter_enter_applies_executor() {
     let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
     app.dialog = DialogState::Filter;
-    app.filters.executor_filter_input = "Human".to_string();
+    app.filters.executors = vec!["agent: claude-code".into(), "human: terminal".into()];
+    app.filters.executor_sel = 2; // "human: terminal"
 
     let action = app.handle_input(KeyEvent::from(KeyCode::Enter));
     assert!(matches!(action, SearchAction::Reload));
-    assert_eq!(app.filters.executor_type, Some("human".to_string())); // lowercased
+    assert_eq!(
+        app.filters.executor_type,
+        Some("terminal".to_string()) // extracts name part after ": "
+    );
+}
+
+#[test]
+fn test_filter_enter_executor_all() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Filter;
+    app.filters.executors = vec!["agent: claude-code".into()];
+    app.filters.executor_sel = 0; // "All"
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Enter));
+    assert!(matches!(action, SearchAction::Reload));
+    assert_eq!(app.filters.executor_type, None); // "All" clears the filter
 }
 
 #[test]
