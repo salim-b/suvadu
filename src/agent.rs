@@ -16,6 +16,11 @@ pub fn handle_agent(cmd: cli::AgentCommands) -> Result<(), Box<dyn std::error::E
             executor,
             here,
         } => handle_agent_dashboard(&after, executor.as_deref(), here),
+        cli::AgentCommands::Prompts {
+            after,
+            executor,
+            here,
+        } => handle_agent_prompts(&after, executor.as_deref(), here),
         cli::AgentCommands::Stats {
             days,
             executor,
@@ -430,6 +435,31 @@ fn handle_agent_dashboard(
 
     if let Err(e) = res {
         eprintln!("Error in agent UI: {e}");
+    }
+    Ok(())
+}
+
+fn handle_agent_prompts(
+    after: &str,
+    executor: Option<&str>,
+    here: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo = repository::Repository::init()?;
+    let after_ms = util::parse_date_input(after, false);
+    let cwd_filter = if here {
+        Some(std::env::current_dir()?.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    let entries = agent_ui::load_entries(&repo, after_ms, executor, cwd_filter.as_deref());
+
+    let mut guard = util::TerminalGuard::new()?;
+    let res = agent_ui::run_prompt_explorer(guard.terminal(), &entries, Some(&repo));
+    drop(guard);
+
+    if let Err(e) = res {
+        eprintln!("Error in prompt explorer: {e}");
     }
     Ok(())
 }

@@ -76,6 +76,7 @@ fn run_command(command: Commands) -> Result<(), Box<dyn std::error::Error>> {
         cmd @ Commands::Add { .. } => run_add(cmd),
         Commands::Init { target } => run_init(target),
         Commands::HookClaudeCode => integrations::handle_hook_claude_code(),
+        Commands::HookClaudeCodeFailure => integrations::handle_hook_claude_code_failure(),
         Commands::HookClaudePrompt => integrations::handle_hook_claude_prompt(),
         cmd @ Commands::Search { .. } => run_search(cmd),
         Commands::Get {
@@ -315,6 +316,7 @@ const fn is_user_facing_command(cmd: &Commands) -> bool {
             | Commands::Add { .. }
             | Commands::Get { .. }
             | Commands::HookClaudeCode
+            | Commands::HookClaudeCodeFailure
             | Commands::HookClaudePrompt
             | Commands::Completions { .. }
             | Commands::Man
@@ -396,6 +398,7 @@ mod tests {
             target: cli::InitTarget::Zsh,
         }));
         assert!(!is_user_facing_command(&Commands::HookClaudeCode));
+        assert!(!is_user_facing_command(&Commands::HookClaudeCodeFailure));
         assert!(!is_user_facing_command(&Commands::HookClaudePrompt));
         assert!(!is_user_facing_command(&Commands::Man));
         assert!(!is_user_facing_command(&Commands::Completions {

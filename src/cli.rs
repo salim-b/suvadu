@@ -104,6 +104,10 @@ pub enum Commands {
     #[command(name = "hook-claude-code", hide = true)]
     HookClaudeCode,
 
+    /// Process a Claude Code `PostToolUseFailure` hook event (reads JSON from stdin)
+    #[command(name = "hook-claude-code-failure", hide = true)]
+    HookClaudeCodeFailure,
+
     /// Process a Claude Code `UserPromptSubmit` hook event (reads JSON from stdin)
     #[command(name = "hook-claude-prompt", hide = true)]
     HookClaudePrompt,
@@ -580,6 +584,23 @@ pub enum AgentCommands {
     Dashboard {
         /// Start date (default: today)
         #[arg(long, default_value = "today")]
+        after: String,
+        /// Filter to a specific agent (e.g. claude-code, cursor)
+        #[arg(long)]
+        executor: Option<String>,
+        /// Filter to commands run in the current directory
+        #[arg(long)]
+        here: bool,
+    },
+
+    /// Browse agent prompts and the commands they triggered
+    #[command(
+        name = "prompts",
+        after_help = "Examples:\n  suv agent prompts\n  suv agent prompts --executor claude-code\n  suv agent prompts --after \"7 days ago\""
+    )]
+    Prompts {
+        /// Start date (default: 7 days ago)
+        #[arg(long, default_value = "7 days ago")]
         after: String,
         /// Filter to a specific agent (e.g. claude-code, cursor)
         #[arg(long)]

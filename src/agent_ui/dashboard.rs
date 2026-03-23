@@ -23,6 +23,12 @@ use super::{
 
 const PAGE_SIZE: usize = 50;
 
+enum DashboardAction {
+    Continue,
+    Quit,
+    OpenPrompts,
+}
+
 struct AgentApp {
     entries: Vec<Entry>,
     /// Filtered indices into `entries`, recent first
@@ -191,9 +197,14 @@ impl AgentApp {
 
     // ── Input ────────────────────────────────────────────────
 
-    fn handle_input(&mut self, key: crossterm::event::KeyEvent, repo: &Repository) -> bool {
+    fn handle_input(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        repo: &Repository,
+    ) -> DashboardAction {
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => return false,
+            KeyCode::Esc | KeyCode::Char('q') => return DashboardAction::Quit,
+            KeyCode::Char('p') => return DashboardAction::OpenPrompts,
             // Period
             KeyCode::Char('1') => {
                 self.period = Period::Today;
@@ -289,7 +300,7 @@ impl AgentApp {
             }
             _ => {}
         }
-        true
+        DashboardAction::Continue
     }
 
     // ── Render ───────────────────────────────────────────────
@@ -890,6 +901,8 @@ impl AgentApp {
                 },
                 badge_label,
             ),
+            Span::styled(" p ", badge_key),
+            Span::styled(" Prompts  ", badge_label),
             Span::styled(" ^Y ", badge_key),
             Span::styled(" Copy  ", badge_label),
             Span::styled(" q ", badge_key),
@@ -1178,8 +1191,16 @@ where
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            if !app.handle_input(key, repo) {
-                return Ok(());
+            match app.handle_input(key, repo) {
+                DashboardAction::Quit => return Ok(()),
+                DashboardAction::OpenPrompts => {
+                    super::prompts::run_prompt_explorer(
+                        terminal,
+                        &app.entries,
+                        Some(repo),
+                    )?;
+                }
+                DashboardAction::Continue => {}
             }
         }
     }

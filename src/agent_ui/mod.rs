@@ -1,7 +1,9 @@
 mod dashboard;
+mod prompts;
 mod stats;
 
 pub use dashboard::run_agent_ui;
+pub use prompts::run_prompt_explorer;
 pub use stats::run_agent_stats_ui;
 
 use std::collections::HashMap;
@@ -78,6 +80,15 @@ pub fn load_entries(
     executor: Option<&str>,
     cwd: Option<&str>,
 ) -> Vec<Entry> {
+    // When no executor filter is set, we need ALL entries to filter by
+    // is_agent() in memory. Don't apply a SQL LIMIT before the filter,
+    // otherwise the limit hits non-agent entries and cuts off recent ones.
+    let sql_limit = if executor.is_some() {
+        Some(MAX_AGENT_ENTRIES)
+    } else {
+        None
+    };
+
     let all = repo
         .get_replay_entries(
             None,
@@ -85,17 +96,19 @@ pub fn load_entries(
                 after: after_ms,
                 executor,
                 cwd,
-                limit: Some(MAX_AGENT_ENTRIES),
+                limit: sql_limit,
                 ..Default::default()
             },
         )
         .unwrap_or_default();
 
-    if executor.is_some() {
+    let mut entries: Vec<Entry> = if executor.is_some() {
         all
     } else {
         all.into_iter().filter(Entry::is_agent).collect()
-    }
+    };
+    entries.truncate(MAX_AGENT_ENTRIES);
+    entries
 }
 
 pub fn compute_agent_counts(entries: &[Entry]) -> Vec<(String, usize)> {
