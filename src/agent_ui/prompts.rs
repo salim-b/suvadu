@@ -24,7 +24,7 @@ use super::{format_datetime, format_full_datetime, truncate};
 const PAGE_SIZE: usize = 50;
 
 /// Strip common agent prefixes from session IDs and return the first 8 chars.
-/// e.g. "claude-264d95ad-a881-..." → "264d95ad", "opencode-ses_303f..." → "ses_303f"
+/// e.g. "claude-264d95ad-a881-..." → "264d95ad", "opencode-ses_303f..." → "`ses_303f`"
 fn short_session_id(id: &str) -> String {
     let stripped = id
         .strip_prefix("claude-")
@@ -475,6 +475,51 @@ impl<'a> PromptExplorerApp<'a> {
         self.render_list_footer(f, chunks[2], t);
     }
 
+    fn build_list_row<'b>(g: &PromptGroup, t: &crate::theme::Theme) -> Row<'b> {
+        let time = format_datetime(g.last_at);
+        let session = short_session_id(&g.session_id);
+        let executor = &g.executor;
+        let prompt_display = truncate(&g.prompt.replace('\n', " "), 50);
+        let duration = format_duration_ms(g.total_duration_ms);
+
+        // Build status cell: checkmark N  cross N (only show counts that are > 0)
+        let mut status_spans: Vec<Span> = Vec::new();
+        if g.success_count > 0 {
+            status_spans.push(Span::styled(
+                format!("\u{2714}{}", g.success_count),
+                Style::default().fg(t.success),
+            ));
+        }
+        if g.fail_count > 0 {
+            if !status_spans.is_empty() {
+                status_spans.push(Span::raw(" "));
+            }
+            status_spans.push(Span::styled(
+                format!("\u{2718}{}", g.fail_count),
+                Style::default().fg(t.error),
+            ));
+        }
+        if status_spans.is_empty() {
+            status_spans.push(Span::styled("\u{25CB}", Style::default().fg(t.text_muted)));
+        }
+
+        Row::new(vec![
+            Cell::from(Span::styled(time, Style::default().fg(t.text_muted))),
+            Cell::from(Span::styled(session, Style::default().fg(t.primary_dim))),
+            Cell::from(Span::styled(
+                executor.clone(),
+                Style::default().fg(t.badge_executor),
+            )),
+            Cell::from(Span::styled(prompt_display, Style::default().fg(t.text))),
+            Cell::from(Span::styled(
+                format!("{}", g.cmd_count),
+                Style::default().fg(t.info),
+            )),
+            Cell::from(Line::from(status_spans)),
+            Cell::from(Span::styled(duration, Style::default().fg(t.text_muted))),
+        ])
+    }
+
     fn render_list_table(&mut self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {
         let scrollbar_area = area;
         let table_area = Rect {
@@ -486,50 +531,7 @@ impl<'a> PromptExplorerApp<'a> {
 
         let rows: Vec<Row> = page_items
             .iter()
-            .map(|g| {
-                let time = format_datetime(g.last_at);
-                let session = short_session_id(&g.session_id);
-                let executor = &g.executor;
-                let prompt_display = truncate(&g.prompt.replace('\n', " "), 50);
-                let duration = format_duration_ms(g.total_duration_ms);
-
-                // Build status cell: ✔ N  ✘ N (only show counts that are > 0)
-                let mut status_spans: Vec<Span> = Vec::new();
-                if g.success_count > 0 {
-                    status_spans.push(Span::styled(
-                        format!("✔{}", g.success_count),
-                        Style::default().fg(t.success),
-                    ));
-                }
-                if g.fail_count > 0 {
-                    if !status_spans.is_empty() {
-                        status_spans.push(Span::raw(" "));
-                    }
-                    status_spans.push(Span::styled(
-                        format!("✘{}", g.fail_count),
-                        Style::default().fg(t.error),
-                    ));
-                }
-                if status_spans.is_empty() {
-                    status_spans.push(Span::styled("○", Style::default().fg(t.text_muted)));
-                }
-
-                Row::new(vec![
-                    Cell::from(Span::styled(time, Style::default().fg(t.text_muted))),
-                    Cell::from(Span::styled(session, Style::default().fg(t.primary_dim))),
-                    Cell::from(Span::styled(
-                        executor.clone(),
-                        Style::default().fg(t.badge_executor),
-                    )),
-                    Cell::from(Span::styled(prompt_display, Style::default().fg(t.text))),
-                    Cell::from(Span::styled(
-                        format!("{}", g.cmd_count),
-                        Style::default().fg(t.info),
-                    )),
-                    Cell::from(Line::from(status_spans)),
-                    Cell::from(Span::styled(duration, Style::default().fg(t.text_muted))),
-                ])
-            })
+            .map(|g| Self::build_list_row(g, t))
             .collect();
 
         let header = Row::new(vec![
@@ -639,29 +641,33 @@ impl<'a> PromptExplorerApp<'a> {
             )));
         }
 
-        // Separator
+        // Separator + metadata
         lines.push(Line::from(""));
+        Self::append_preview_metadata(&mut lines, t, group, home);
+
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+
+    fn append_preview_metadata(
+        lines: &mut Vec<Line<'_>>,
+        t: &crate::theme::Theme,
+        group: &PromptGroup,
+        home: &str,
+    ) {
+        let label_style = Style::default()
+            .fg(t.text_secondary)
+            .add_modifier(Modifier::BOLD);
 
         // Session ID
         let session_short: String = short_session_id(&group.session_id);
         lines.push(Line::from(vec![
-            Span::styled(
-                " Session  ",
-                Style::default()
-                    .fg(t.text_secondary)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" Session  ", label_style),
             Span::styled(session_short, Style::default().fg(t.primary_dim)),
         ]));
 
         // Executor
         lines.push(Line::from(vec![
-            Span::styled(
-                " Executor ",
-                Style::default()
-                    .fg(t.text_secondary)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" Executor ", label_style),
             Span::styled(
                 group.executor.clone(),
                 Style::default().fg(t.badge_executor),
@@ -671,35 +677,20 @@ impl<'a> PromptExplorerApp<'a> {
         // Path
         let path_display = shorten_path(&group.cwd, home);
         lines.push(Line::from(vec![
-            Span::styled(
-                " Path     ",
-                Style::default()
-                    .fg(t.text_secondary)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" Path     ", label_style),
             Span::styled(path_display, Style::default().fg(t.badge_path)),
         ]));
 
         // Time range
         lines.push(Line::from(vec![
-            Span::styled(
-                " First    ",
-                Style::default()
-                    .fg(t.text_secondary)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" First    ", label_style),
             Span::styled(
                 format_full_datetime(group.first_at),
                 Style::default().fg(t.text),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled(
-                " Last     ",
-                Style::default()
-                    .fg(t.text_secondary)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" Last     ", label_style),
             Span::styled(
                 format_full_datetime(group.last_at),
                 Style::default().fg(t.text),
@@ -709,30 +700,23 @@ impl<'a> PromptExplorerApp<'a> {
         // Cmd count + success
         let fail_count = group.fail_count;
         let mut stat_spans = vec![
-            Span::styled(
-                " Stats    ",
-                Style::default()
-                    .fg(t.text_secondary)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" Stats    ", label_style),
             Span::styled(
                 format!("{} cmds", group.cmd_count),
                 Style::default().fg(t.text),
             ),
             Span::styled(
-                format!("  ✔ {}", group.success_count),
+                format!("  \u{2714} {}", group.success_count),
                 Style::default().fg(t.success),
             ),
         ];
         if fail_count > 0 {
             stat_spans.push(Span::styled(
-                format!("  ✘ {fail_count}"),
+                format!("  \u{2718} {fail_count}"),
                 Style::default().fg(t.error),
             ));
         }
         lines.push(Line::from(stat_spans));
-
-        f.render_widget(Paragraph::new(lines), inner);
     }
 
     fn render_list_footer(&self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {
@@ -789,7 +773,9 @@ impl<'a> PromptExplorerApp<'a> {
         } else {
             1
         };
-        let prompt_box_h = (prompt_line_count as u16) + 4; // +2 for borders, +2 for header/stats line
+        let prompt_box_h = u16::try_from(prompt_line_count)
+            .unwrap_or(u16::MAX)
+            .saturating_add(4); // +2 for borders, +2 for header/stats line
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -801,7 +787,7 @@ impl<'a> PromptExplorerApp<'a> {
             .split(size);
 
         // Prompt area (full prompt text + stats)
-        self.render_prompt_header(f, chunks[0], t, group);
+        Self::render_prompt_header(f, chunks[0], t, group);
 
         // Body
         if self.detail_pane_open {
@@ -820,7 +806,6 @@ impl<'a> PromptExplorerApp<'a> {
     }
 
     fn render_prompt_header(
-        &self,
         f: &mut ratatui::Frame,
         area: Rect,
         t: &crate::theme::Theme,
@@ -1191,12 +1176,9 @@ fn open_session<B: Backend>(
 where
     io::Error: From<B::Error>,
 {
-    let session = match repo.get_session(session_id) {
-        Ok(Some(s)) => s,
-        _ => {
-            app.status_message = Some(("Session not found".into(), Instant::now()));
-            return Ok(());
-        }
+    let Ok(Some(session)) = repo.get_session(session_id) else {
+        app.status_message = Some(("Session not found".into(), Instant::now()));
+        return Ok(());
     };
     let tag_name = repo.get_tag_by_session(session_id).unwrap_or(None);
     let entries = repo

@@ -1007,8 +1007,7 @@ fn compute_program_groups(
         let program = cmd.split_whitespace().next().unwrap_or(cmd);
         let resolved = alias_map
             .get(program)
-            .map(|s| s.as_str())
-            .unwrap_or(program);
+            .map_or(program, std::string::String::as_str);
         *groups.entry(resolved.to_string()).or_insert(0) += count;
     }
     let mut sorted: Vec<(String, i64)> = groups.into_iter().collect();
@@ -1016,7 +1015,7 @@ fn compute_program_groups(
     sorted
 }
 
-/// Build a map of alias_name -> resolved_program from suvadu aliases + shell aliases.
+/// Build a map of `alias_name` -> `resolved_program` from suvadu aliases + shell aliases.
 fn build_alias_map(repo: &Repository, programs: &[&str]) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
@@ -1053,7 +1052,7 @@ fn detect_shell_aliases(programs: &[&str]) -> Option<HashMap<String, String>> {
     // Build a single command: type prog1; type prog2; ...
     let type_cmds: Vec<String> = programs
         .iter()
-        .map(|p| format!("type {} 2>/dev/null", p))
+        .map(|p| format!("type {p} 2>/dev/null"))
         .collect();
     let script = type_cmds.join("; ");
 
@@ -1070,7 +1069,7 @@ fn detect_shell_aliases(programs: &[&str]) -> Option<HashMap<String, String>> {
 ///
 /// Handles:
 ///   zsh:  "gst is an alias for git status"
-///   bash: "gst is aliased to `git status'"
+///   bash: "gst is aliased to \`git status'"
 ///         "gst is aliased to 'git status'"
 fn parse_type_output(output: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
@@ -1097,7 +1096,6 @@ fn parse_type_output(output: &str) -> HashMap<String, String> {
             if let Some(prog) = command.split_whitespace().next() {
                 map.insert(name.to_string(), prog.to_string());
             }
-            continue;
         }
     }
     map

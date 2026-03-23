@@ -216,10 +216,9 @@ add-zsh-hook precmd _suvadu_precmd
 "#
 }
 
-/// Zsh interactive search widget and arrow-key cycling widgets, plus widget
-/// registration and the Ctrl+R binding.
+/// Zsh interactive search widget (Ctrl+R binding).
 #[allow(clippy::literal_string_with_formatting_args)]
-const fn zsh_widgets_script() -> &'static str {
+const fn zsh_search_widget_script() -> &'static str {
     r#"# Interactive Search Widget
 _suvadu_search_widget() {
     # Normalize zsh options to defaults for this widget scope. This prevents
@@ -275,7 +274,17 @@ _suvadu_search_widget() {
     zle -R
 }
 
-# Up Arrow Widget (Native Cycling)
+# Register widget and bind to Ctrl+R
+zle -N suvadu-search _suvadu_search_widget
+bindkey '^R' suvadu-search
+
+"#
+}
+
+/// Zsh arrow-key cycling widgets (Up/Down) and their registration.
+#[allow(clippy::literal_string_with_formatting_args)]
+const fn zsh_arrow_widgets_script() -> &'static str {
+    r#"# Up Arrow Widget (Native Cycling)
 _suvadu_up_arrow_widget() {
     emulate -L zsh
 
@@ -334,11 +343,6 @@ _suvadu_down_arrow_widget() {
     fi
     zle -R
 }
-
-
-# Register widget and bind to Ctrl+R
-zle -N suvadu-search _suvadu_search_widget
-bindkey '^R' suvadu-search
 
 # Register Up/Down
 zle -N suvadu-up-arrow _suvadu_up_arrow_widget
@@ -533,7 +537,8 @@ pub fn get_zsh_hook(config: &config::Config) -> Result<String, Box<dyn std::erro
     let mut script = zsh_preexec_script(&bin_path);
     script.push_str(&executor_detection_script(config));
     script.push_str(zsh_hook_functions());
-    script.push_str(zsh_widgets_script());
+    script.push_str(zsh_search_widget_script());
+    script.push_str(zsh_arrow_widgets_script());
 
     if config.shell.enable_arrow_navigation {
         script.push_str(

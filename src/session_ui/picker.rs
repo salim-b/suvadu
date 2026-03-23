@@ -16,10 +16,19 @@ use crate::util::{self, format_duration_ms};
 
 use chrono::{Local, TimeZone};
 
+/// Result of handling a key in normal mode.
+enum PickerAction {
+    /// Continue the event loop.
+    Continue,
+    /// Exit the picker with the given result.
+    Exit(Option<String>),
+}
+
 // ── Filter state ────────────────────────────────────────────
 
 const NUM_FILTER_FIELDS: usize = 3;
 
+#[derive(Default)]
 struct PickerFilter {
     // Live search (session ID / tag — always active)
     search: String,
@@ -35,22 +44,6 @@ struct PickerFilter {
     tag_query: String,
     after_ms: Option<i64>,
     before_ms: Option<i64>,
-}
-
-impl Default for PickerFilter {
-    fn default() -> Self {
-        Self {
-            search: String::new(),
-            tag_input: String::new(),
-            start_date_input: String::new(),
-            end_date_input: String::new(),
-            focus_index: 0,
-            popup_open: false,
-            tag_query: String::new(),
-            after_ms: None,
-            before_ms: None,
-        }
-    }
 }
 
 // ── App ─────────────────────────────────────────────────────
@@ -103,8 +96,8 @@ impl PickerApp {
 
                 // Date range: session has any command in the range
                 // (first_cmd_at..=last_cmd_at overlaps with after..=before)
-                let after_ok = after.map_or(true, |ms| s.last_cmd_at >= ms);
-                let before_ok = before.map_or(true, |ms| s.first_cmd_at <= ms);
+                let after_ok = after.is_none_or(|ms| s.last_cmd_at >= ms);
+                let before_ok = before.is_none_or(|ms| s.first_cmd_at <= ms);
 
                 search_ok && tag_ok && after_ok && before_ok
             })
@@ -118,7 +111,7 @@ impl PickerApp {
         }
     }
 
-    fn active_filter_count(&self) -> usize {
+    const fn active_filter_count(&self) -> usize {
         let mut n = 0;
         if !self.filter.tag_query.is_empty() {
             n += 1;
@@ -248,8 +241,24 @@ impl PickerApp {
             ])
             .split(size);
 
-        // Search bar (live filtering)
         let filter_count = self.active_filter_count();
+        self.render_search_bar(f, chunks[0], t, filter_count);
+        self.render_session_table(f, chunks[1], t, filter_count);
+        Self::render_footer(f, chunks[2], t, filter_count);
+
+        // Filter popup overlay
+        if self.filter.popup_open {
+            self.render_filter_popup(f, size);
+        }
+    }
+
+    fn render_search_bar(
+        &self,
+        f: &mut ratatui::Frame,
+        area: Rect,
+        t: &crate::theme::Theme,
+        filter_count: usize,
+    ) {
         let filter_badge = if filter_count > 0 {
             format!(
                 " [{filter_count} filter{}]",
@@ -276,9 +285,16 @@ impl PickerApp {
                     .border_style(Style::default().fg(search_border))
                     .title(search_title),
             );
-        f.render_widget(search_bar, chunks[0]);
+        f.render_widget(search_bar, area);
+    }
 
-        // Table
+    fn render_session_table(
+        &mut self,
+        f: &mut ratatui::Frame,
+        area: Rect,
+        t: &crate::theme::Theme,
+        filter_count: usize,
+    ) {
         let showing = self.visible.len();
         let total = self.sessions.len();
         let title = if self.filter.search.is_empty() && filter_count == 0 {
@@ -339,7 +355,7 @@ impl PickerApp {
             )
             .highlight_symbol(" > ");
 
-        f.render_stateful_widget(table, chunks[1], &mut self.table_state);
+        f.render_stateful_widget(table, area, &mut self.table_state);
 
         if self.visible.is_empty() && !self.sessions.is_empty() {
             let hint = Paragraph::new(Span::styled(
@@ -347,15 +363,21 @@ impl PickerApp {
                 Style::default().fg(t.text_muted),
             ));
             let hint_area = Rect {
-                x: chunks[1].x + 2,
-                y: chunks[1].y + 3,
-                width: chunks[1].width.saturating_sub(4),
+                x: area.x + 2,
+                y: area.y + 3,
+                width: area.width.saturating_sub(4),
                 height: 1,
             };
             f.render_widget(hint, hint_area);
         }
+    }
 
-        // Footer
+    fn render_footer(
+        f: &mut ratatui::Frame,
+        area: Rect,
+        t: &crate::theme::Theme,
+        filter_count: usize,
+    ) {
         let badge_key = Style::default()
             .fg(t.bg_elevated)
             .bg(t.text_secondary)
@@ -363,7 +385,7 @@ impl PickerApp {
         let badge_label = Style::default().fg(t.text_muted);
 
         let mut footer_spans = vec![
-            Span::styled(" ↑↓ ", badge_key),
+            Span::styled(" \u{2191}\u{2193} ", badge_key),
             Span::styled(" Navigate  ", badge_label),
             Span::styled(" Enter ", badge_key),
             Span::styled(" Open  ", badge_label),
@@ -377,12 +399,7 @@ impl PickerApp {
         footer_spans.push(Span::styled(" Esc ", badge_key));
         footer_spans.push(Span::styled(" Quit  ", badge_label));
 
-        f.render_widget(Paragraph::new(Line::from(footer_spans)), chunks[2]);
-
-        // Filter popup overlay
-        if self.filter.popup_open {
-            self.render_filter_popup(f, size);
-        }
+        f.render_widget(Paragraph::new(Line::from(footer_spans)), area);
     }
 
     fn render_filter_popup(&self, f: &mut ratatui::Frame, area: Rect) {
@@ -737,6 +754,115 @@ mod tests {
 
 // ── Public entry point ──────────────────────────────────────
 
+impl PickerApp {
+    fn handle_filter_popup_key(&mut self, key: crossterm::event::KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.filter.popup_open = false;
+                // Discard pending edits -- restore from applied values
+                self.filter.tag_input = self.filter.tag_query.clone();
+                self.filter.start_date_input = self
+                    .filter
+                    .after_ms
+                    .map_or_else(String::new, |_| self.filter.start_date_input.clone());
+                self.filter.end_date_input = self
+                    .filter
+                    .before_ms
+                    .map_or_else(String::new, |_| self.filter.end_date_input.clone());
+            }
+            KeyCode::Tab => {
+                self.filter.focus_index = (self.filter.focus_index + 1) % NUM_FILTER_FIELDS;
+            }
+            KeyCode::BackTab => {
+                self.filter.focus_index = if self.filter.focus_index == 0 {
+                    NUM_FILTER_FIELDS - 1
+                } else {
+                    self.filter.focus_index - 1
+                };
+            }
+            KeyCode::Enter => {
+                // Apply filters
+                self.filter.tag_query = self.filter.tag_input.trim().to_lowercase();
+                self.filter.after_ms = if self.filter.start_date_input.is_empty() {
+                    None
+                } else {
+                    util::parse_date_input(&self.filter.start_date_input, false)
+                };
+                self.filter.before_ms = if self.filter.end_date_input.is_empty() {
+                    None
+                } else {
+                    util::parse_date_input(&self.filter.end_date_input, true)
+                };
+                self.filter.popup_open = false;
+                self.rebuild_visible();
+            }
+            KeyCode::Backspace => match self.filter.focus_index {
+                0 => {
+                    self.filter.tag_input.pop();
+                }
+                1 => {
+                    self.filter.start_date_input.pop();
+                }
+                2 => {
+                    self.filter.end_date_input.pop();
+                }
+                _ => {}
+            },
+            KeyCode::Char(c) => match self.filter.focus_index {
+                0 => self.filter.tag_input.push(c),
+                1 => self.filter.start_date_input.push(c),
+                2 => self.filter.end_date_input.push(c),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    /// Handle a key event in normal (non-popup) mode.
+    fn handle_normal_key(&mut self, key: crossterm::event::KeyEvent) -> PickerAction {
+        match key.code {
+            KeyCode::Esc => {
+                if self.filter.search.is_empty() {
+                    return PickerAction::Exit(None);
+                }
+                self.filter.search.clear();
+                self.rebuild_visible();
+            }
+            KeyCode::Char('q') if self.filter.search.is_empty() => {
+                return PickerAction::Exit(None);
+            }
+            KeyCode::Enter => {
+                return PickerAction::Exit(self.selected_session_id().map(String::from));
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.filter.search.is_empty() => {
+                self.next();
+            }
+            KeyCode::Up | KeyCode::Char('k') if self.filter.search.is_empty() => {
+                self.prev();
+            }
+            KeyCode::Down => self.next(),
+            KeyCode::Up => self.prev(),
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.filter.popup_open = true;
+                self.filter.focus_index = 0;
+            }
+            KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.clear_filters();
+            }
+            KeyCode::Backspace => {
+                self.filter.search.pop();
+                self.rebuild_visible();
+            }
+            KeyCode::Char(c) => {
+                self.filter.search.push(c);
+                self.rebuild_visible();
+            }
+            _ => {}
+        }
+        PickerAction::Continue
+    }
+}
+
 pub fn run_session_picker<B: Backend>(
     terminal: &mut Terminal<B>,
     sessions: Vec<SessionSummary>,
@@ -755,109 +881,9 @@ where
             }
 
             if app.filter.popup_open {
-                // Filter popup mode
-                match key.code {
-                    KeyCode::Esc => {
-                        app.filter.popup_open = false;
-                        // Discard pending edits — restore from applied values
-                        app.filter.tag_input = app.filter.tag_query.clone();
-                        app.filter.start_date_input = app
-                            .filter
-                            .after_ms
-                            .map_or_else(String::new, |_| app.filter.start_date_input.clone());
-                        app.filter.end_date_input = app
-                            .filter
-                            .before_ms
-                            .map_or_else(String::new, |_| app.filter.end_date_input.clone());
-                    }
-                    KeyCode::Tab => {
-                        app.filter.focus_index = (app.filter.focus_index + 1) % NUM_FILTER_FIELDS;
-                    }
-                    KeyCode::BackTab => {
-                        app.filter.focus_index = if app.filter.focus_index == 0 {
-                            NUM_FILTER_FIELDS - 1
-                        } else {
-                            app.filter.focus_index - 1
-                        };
-                    }
-                    KeyCode::Enter => {
-                        // Apply filters
-                        app.filter.tag_query = app.filter.tag_input.trim().to_lowercase();
-                        app.filter.after_ms = if app.filter.start_date_input.is_empty() {
-                            None
-                        } else {
-                            util::parse_date_input(&app.filter.start_date_input, false)
-                        };
-                        app.filter.before_ms = if app.filter.end_date_input.is_empty() {
-                            None
-                        } else {
-                            util::parse_date_input(&app.filter.end_date_input, true)
-                        };
-                        app.filter.popup_open = false;
-                        app.rebuild_visible();
-                    }
-                    KeyCode::Backspace => match app.filter.focus_index {
-                        0 => {
-                            app.filter.tag_input.pop();
-                        }
-                        1 => {
-                            app.filter.start_date_input.pop();
-                        }
-                        2 => {
-                            app.filter.end_date_input.pop();
-                        }
-                        _ => {}
-                    },
-                    KeyCode::Char(c) => match app.filter.focus_index {
-                        0 => app.filter.tag_input.push(c),
-                        1 => app.filter.start_date_input.push(c),
-                        2 => app.filter.end_date_input.push(c),
-                        _ => {}
-                    },
-                    _ => {}
-                }
-            } else {
-                // Normal mode — typing goes to live search
-                match key.code {
-                    KeyCode::Esc => {
-                        if !app.filter.search.is_empty() {
-                            app.filter.search.clear();
-                            app.rebuild_visible();
-                        } else {
-                            return Ok(None);
-                        }
-                    }
-                    KeyCode::Char('q') if app.filter.search.is_empty() => {
-                        return Ok(None);
-                    }
-                    KeyCode::Enter => {
-                        return Ok(app.selected_session_id().map(String::from));
-                    }
-                    KeyCode::Down | KeyCode::Char('j') if app.filter.search.is_empty() => {
-                        app.next();
-                    }
-                    KeyCode::Up | KeyCode::Char('k') if app.filter.search.is_empty() => {
-                        app.prev();
-                    }
-                    KeyCode::Down => app.next(),
-                    KeyCode::Up => app.prev(),
-                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.filter.popup_open = true;
-                        app.filter.focus_index = 0;
-                    }
-                    KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.clear_filters();
-                    }
-                    KeyCode::Backspace => {
-                        app.filter.search.pop();
-                        app.rebuild_visible();
-                    }
-                    KeyCode::Char(c) => {
-                        app.filter.search.push(c);
-                        app.rebuild_visible();
-                    }
-                    _ => {}
-                }
+                app.handle_filter_popup_key(key);
+            } else if let PickerAction::Exit(result) = app.handle_normal_key(key) {
+                return Ok(result);
             }
         }
     }

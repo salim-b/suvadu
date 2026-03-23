@@ -222,7 +222,7 @@ fn parse_exit_code_from_error(error: &str) -> Option<i32> {
     for pat in patterns {
         if let Some(pos) = error.to_lowercase().find(pat) {
             let after = &error[pos + pat.len()..];
-            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let num_str: String = after.chars().take_while(char::is_ascii_digit).collect();
             if let Ok(code) = num_str.parse::<i32>() {
                 return Some(code);
             }
@@ -527,9 +527,9 @@ pub fn try_merge_claude_settings(
             .ok_or("settings.json root is not an object")?;
         let hooks = obj.entry("hooks").or_insert_with(|| serde_json::json!({}));
         let hooks_obj = hooks.as_object_mut().ok_or("hooks is not an object")?;
-        let mut changed = false;
-
-        if !has_suvadu_hook_in_obj(hooks_obj, "PostToolUseFailure") {
+        let added_failure = if has_suvadu_hook_in_obj(hooks_obj, "PostToolUseFailure") {
+            false
+        } else {
             add_hook_entry(
                 hooks_obj,
                 "PostToolUseFailure",
@@ -541,10 +541,12 @@ pub fn try_merge_claude_settings(
                     }]
                 }),
             )?;
-            changed = true;
-        }
+            true
+        };
 
-        if !has_suvadu_hook_in_obj(hooks_obj, "UserPromptSubmit") {
+        let added_prompt = if has_suvadu_hook_in_obj(hooks_obj, "UserPromptSubmit") {
+            false
+        } else {
             add_hook_entry(
                 hooks_obj,
                 "UserPromptSubmit",
@@ -555,12 +557,12 @@ pub fn try_merge_claude_settings(
                     }]
                 }),
             )?;
-            changed = true;
-        }
+            true
+        };
 
         // Also deduplicate
         let deduped = dedup_suvadu_hooks(&mut settings);
-        if changed || deduped {
+        if added_failure || added_prompt || deduped {
             let updated = serde_json::to_string_pretty(&settings)?;
             atomic_write(settings_path, &updated)?;
         }

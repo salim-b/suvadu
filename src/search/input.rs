@@ -300,60 +300,7 @@ impl SearchApp {
                 };
             }
             KeyCode::Enter => {
-                // Apply filters
-                self.filters.after = if self.filters.start_date_input.is_empty() {
-                    None
-                } else {
-                    util::parse_date_input(&self.filters.start_date_input, false)
-                };
-
-                self.filters.before = if self.filters.end_date_input.is_empty() {
-                    None
-                } else {
-                    util::parse_date_input(&self.filters.end_date_input, true)
-                };
-
-                // Resolve tag name to ID
-                self.filters.tag_id = if self.filters.tag_filter_input.is_empty() {
-                    None
-                } else {
-                    let input_lower = self.filters.tag_filter_input.to_lowercase();
-                    self.tags
-                        .iter()
-                        .find(|t| t.name == input_lower)
-                        .map(|t| t.id)
-                };
-
-                // Parse exit code
-                self.filters.exit_code = if self.filters.exit_code_input.is_empty() {
-                    None
-                } else {
-                    self.filters.exit_code_input.trim().parse::<i32>().ok()
-                };
-
-                // Apply executor from selector — extract the name part after ": "
-                // e.g. "agent: claude-code" → "claude-code"
-                self.filters.executor_type = if self.filters.executor_sel == 0 {
-                    None // "All"
-                } else {
-                    self.filters
-                        .executors
-                        .get(self.filters.executor_sel - 1)
-                        .map(|label| {
-                            label
-                                .split_once(": ")
-                                .map_or(label.as_str(), |(_, name)| name)
-                                .to_string()
-                        })
-                };
-                // Sync the text input for display
-                self.filters.executor_filter_input =
-                    self.filters.executor_type.clone().unwrap_or_default();
-
-                self.dialog = DialogState::None;
-                // Reset to page 1 on new filter
-                self.pagination.page = 1;
-                return SearchAction::Reload;
+                return self.apply_filters();
             }
             // Executor selector: Up/Down cycles through options
             KeyCode::Up if self.filters.focus_index == 4 => {
@@ -403,5 +350,61 @@ impl SearchApp {
             _ => {}
         }
         SearchAction::Continue
+    }
+
+    fn apply_filters(&mut self) -> SearchAction {
+        // Apply filters
+        self.filters.after = if self.filters.start_date_input.is_empty() {
+            None
+        } else {
+            util::parse_date_input(&self.filters.start_date_input, false)
+        };
+
+        self.filters.before = if self.filters.end_date_input.is_empty() {
+            None
+        } else {
+            util::parse_date_input(&self.filters.end_date_input, true)
+        };
+
+        // Resolve tag name to ID
+        self.filters.tag_id = if self.filters.tag_filter_input.is_empty() {
+            None
+        } else {
+            let input_lower = self.filters.tag_filter_input.to_lowercase();
+            self.tags
+                .iter()
+                .find(|t| t.name == input_lower)
+                .map(|t| t.id)
+        };
+
+        // Parse exit code
+        self.filters.exit_code = if self.filters.exit_code_input.is_empty() {
+            None
+        } else {
+            self.filters.exit_code_input.trim().parse::<i32>().ok()
+        };
+
+        // Apply executor from selector -- extract the name part after ": "
+        // e.g. "agent: claude-code" -> "claude-code"
+        self.filters.executor_type = if self.filters.executor_sel == 0 {
+            None // "All"
+        } else {
+            self.filters
+                .executors
+                .get(self.filters.executor_sel - 1)
+                .map(|label| {
+                    label
+                        .split_once(": ")
+                        .map_or(label.as_str(), |(_, name)| name)
+                        .to_string()
+                })
+        };
+        // Sync the text input for display
+        self.filters.executor_filter_input = self.filters.executor_type.clone().unwrap_or_default();
+
+        self.dialog = DialogState::None;
+        // Reset to page 1 on new filter
+        self.pagination.page = 1;
+        SearchAction::Reload
     }
 }
