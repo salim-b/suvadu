@@ -808,10 +808,9 @@ impl AgentApp {
             Span::styled(executor, val),
         ]));
 
-        let session: String = entry.session_id.chars().take(8).collect();
         lines.push(Line::from(vec![
             Span::styled("Session  ", label),
-            Span::styled(session, val),
+            Span::styled(entry.session_id.clone(), val),
         ]));
     }
 

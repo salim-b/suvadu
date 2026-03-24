@@ -82,7 +82,7 @@ Your shell history is one of your most valuable productivity assets — but the 
 | **AI agent tracking** | Auto-detect + risk assess | No | No | No | No |
 | **Secrets redaction** | Auto before storage | No | No | No | No |
 | **Session timeline** | Interactive TUI | No | No | No | No |
-| **Themes** | 5 built-in, hot-swap | No | No | No | No |
+| **Themes** | 3 built-in, hot-swap | No | No | No | No |
 | **Signed updates** | Minisign verification | Yes | No | No | No |
 | **Account required** | No | Yes (for sync) | No | No | No |
 
@@ -114,13 +114,15 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - Configurable via `suv settings` → Shell → Enable Arrow Key Navigation
 
 ### AI Agent Monitoring
-- **Auto-detection** — identifies commands from Claude Code, Codex, Aider, VS Code, Cursor, Windsurf, and more
+- **Auto-detection** — identifies commands from Claude Code, Cursor, Antigravity, Codex, Aider, VS Code, and more
 - **Risk assessment** — every agent command classified as Critical, High, Medium, Low, or Safe
 - **Agent dashboard** — real-time TUI with timeline, risk indicators, and detail pane
 - **Prompt Explorer** — browse agent prompts and drill into the commands they triggered (`suv agent prompts` or `p` in dashboard)
 - **Agent stats** — per-agent analytics with top commands, directories, and risk breakdown
 - **Agent report** — export activity as text, markdown, or JSON
-- **Claude Code integration** — `suv init claude-code` captures AI-executed commands via PostToolUse and PostToolUseFailure hooks
+- **Claude Code integration** — `suv init claude-code` captures AI-executed commands and prompts via PostToolUse, PostToolUseFailure, and UserPromptSubmit hooks
+- **Cursor integration** — `suv init cursor` captures AI agent commands and prompts via afterShellExecution and beforeSubmitPrompt hooks
+- **Antigravity integration** — auto-detects agent commands via `$ANTIGRAVITY_AGENT` (prompts not available — no hooks system)
 - **OpenCode integration** — `suv init opencode` installs a plugin for automatic command capture
 - **Custom agent config** — define detection rules for any agent via `suv settings` → Agents tab
 
@@ -414,9 +416,8 @@ Suvadu automatically detects and records **who or what** executed each command:
 | Type | Executors | Detection |
 |------|-----------|-----------|
 | **Human** | Terminal | Interactive TTY check |
-| **AI Agent** | Claude Code, Codex, Aider, Continue | Environment variables |
-| **IDE** | VS Code, Cursor, Windsurf, Antigravity, IntelliJ, PyCharm | Environment variables |
-| **Bot** | Copilot | Environment variables |
+| **AI Agent** | Claude Code, Cursor, Antigravity, Codex, Aider, Continue, Copilot | Hooks + environment variables |
+| **IDE** | VS Code, Cursor, Windsurf, IntelliJ, PyCharm | Environment variables |
 | **CI/CD** | GitHub Actions, GitLab CI, CircleCI | Environment variables |
 | **Programmatic** | Subprocess | Non-interactive shell fallback |
 
@@ -581,7 +582,7 @@ Installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/ho
 suv init antigravity
 ```
 
-Auto-detects Antigravity via the `$ANTIGRAVITY_AGENT` environment variable. No additional configuration needed.
+Auto-detects Antigravity agent commands via the `$ANTIGRAVITY_AGENT` environment variable. No additional configuration needed. Note: Antigravity does not currently have a hooks system, so prompts cannot be captured — only commands are recorded.
 
 ### OpenCode
 
@@ -606,10 +607,10 @@ Restart your shell after adding agents (`source ~/.zshrc`).
 **Verify any integration:**
 
 ```bash
-suv search --executor agent       # Claude Code
-suv search --executor cursor      # Cursor
-suv search --executor antigravity # Antigravity
-suv search --executor opencode    # OpenCode
+suv search --executor claude-code   # Claude Code
+suv search --executor cursor        # Cursor
+suv search --executor antigravity   # Antigravity
+suv search --executor opencode      # OpenCode
 ```
 
 ---

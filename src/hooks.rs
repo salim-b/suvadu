@@ -82,12 +82,12 @@ __suvadu_detect_executor() {
     elif [[ -n "$CURSOR_INJECTION" ]] || [[ -n "$CURSOR_TRACE_ID" ]]; then
         executor_type="ide"
         executor="cursor"
+    elif [[ -n "$ANTIGRAVITY_AGENT" ]]; then
+        executor_type="agent"
+        executor="antigravity"
     elif [[ "$TERM_PROGRAM" == "vscode" ]] || [[ -n "$VSCODE_INJECTION" ]]; then
         executor_type="ide"
         executor="vscode"
-    elif [[ -n "$ANTIGRAVITY_AGENT" ]]; then
-        executor_type="ide"
-        executor="antigravity"
     elif [[ -n "$INTELLIJ_ENVIRONMENT_READER" ]]; then
         executor_type="ide"
         executor="intellij"

@@ -502,7 +502,7 @@ impl SearchApp {
             _ => "unknown".to_string(),
         };
 
-        let session_str: String = entry.session_id.chars().take(8).collect();
+        let session_str = entry.session_id.clone();
         let tag_str = entry.tag_name.as_deref().unwrap_or("none").to_string();
 
         let mut lines = vec![
@@ -541,6 +541,19 @@ impl SearchApp {
                 Span::styled(executor_str, value_style),
             ]),
         ];
+
+        // Agent prompt (if present)
+        if let Some(ctx) = &entry.context {
+            if let Some(prompt) = ctx.get("agent_prompt") {
+                let t = theme();
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled("Prompt", label_style)]));
+                lines.push(Line::from(vec![Span::styled(
+                    prompt.clone(),
+                    Style::default().fg(t.info),
+                )]));
+            }
+        }
 
         self.append_risk_line(&mut lines, entry, label_style);
         self.append_bookmark_note_lines(&mut lines, entry, value_style);
@@ -2446,14 +2459,10 @@ mod tests {
         let lines = app.build_detail_lines(&entry);
         let text = lines_text(&lines);
 
-        // Session ID should be truncated to first 8 chars
+        // Session ID should be shown in full
         assert!(
-            text.contains("abcdefgh"),
-            "should contain truncated session ID"
-        );
-        assert!(
-            !text.contains("abcdefgh-1234"),
-            "should NOT contain full session ID beyond 8 chars"
+            text.contains("abcdefgh-1234"),
+            "should contain full session ID"
         );
     }
 
