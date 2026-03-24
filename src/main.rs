@@ -77,6 +77,8 @@ fn run_command(command: Commands) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Init { target } => run_init(target),
         Commands::HookClaudeCode => integrations::handle_hook_claude_code(),
         Commands::HookClaudeCodeFailure => integrations::handle_hook_claude_code_failure(),
+        Commands::HookCursor => integrations::handle_hook_cursor(),
+        Commands::HookCursorPrompt => integrations::handle_hook_cursor_prompt(),
         Commands::HookClaudePrompt => integrations::handle_hook_claude_prompt(),
         cmd @ Commands::Search { .. } => run_search(cmd),
         Commands::Get {
@@ -283,11 +285,7 @@ fn run_init(target: cli::InitTarget) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         cli::InitTarget::ClaudeCode => integrations::handle_init_claude_code(),
-        cli::InitTarget::Cursor => integrations::handle_init_ide(
-            "Cursor",
-            "Suvadu detects Cursor via $CURSOR_INJECTION and\n$CURSOR_TRACE_ID environment variables.",
-            "cursor",
-        ),
+        cli::InitTarget::Cursor => integrations::handle_init_cursor(),
         cli::InitTarget::Antigravity => integrations::handle_init_ide(
             "Antigravity",
             "Suvadu detects Antigravity via the $ANTIGRAVITY_AGENT\nenvironment variable.",
@@ -317,6 +315,8 @@ const fn is_user_facing_command(cmd: &Commands) -> bool {
             | Commands::Get { .. }
             | Commands::HookClaudeCode
             | Commands::HookClaudeCodeFailure
+            | Commands::HookCursor
+            | Commands::HookCursorPrompt
             | Commands::HookClaudePrompt
             | Commands::Completions { .. }
             | Commands::Man
@@ -399,6 +399,8 @@ mod tests {
         }));
         assert!(!is_user_facing_command(&Commands::HookClaudeCode));
         assert!(!is_user_facing_command(&Commands::HookClaudeCodeFailure));
+        assert!(!is_user_facing_command(&Commands::HookCursor));
+        assert!(!is_user_facing_command(&Commands::HookCursorPrompt));
         assert!(!is_user_facing_command(&Commands::HookClaudePrompt));
         assert!(!is_user_facing_command(&Commands::Man));
         assert!(!is_user_facing_command(&Commands::Completions {

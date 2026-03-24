@@ -102,7 +102,7 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - **Syntax highlighting** — commands, flags, strings, variables, paths, and operators each get distinct colors
 - **Smart mode** — context-aware ranking boosts same-directory results (`Ctrl+S`)
 - **Directory scoping** — filter to current working directory (`Ctrl+L` or `--here`)
-- **Date filters** — `Ctrl+F` panel with "today", "yesterday", or `YYYY-MM-DD` ranges
+- **Date filters** — `Ctrl+F` panel with "today", "yesterday", "N days ago", or `YYYY-MM-DD` ranges
 - **Detail pane** — `Tab` to preview full entry metadata
 - **Deduplication** — toggle unique command view with `Ctrl+U`
 - **Help overlay** — press `F1` or `?` to see all keyboard shortcuts organized by category
@@ -573,7 +573,7 @@ Installs PostToolUse and PostToolUseFailure hooks and configures `~/.claude/sett
 suv init cursor
 ```
 
-Auto-detects Cursor via `$CURSOR_INJECTION` and `$CURSOR_TRACE_ID` environment variables. No additional configuration needed.
+Installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Captures AI agent commands with exit codes and prompts for agent command grouping. Also auto-detects Cursor's integrated terminal via `$CURSOR_AGENT` and `$CURSOR_INJECTION` environment variables. Restart Cursor after setup.
 
 ### Antigravity
 

@@ -72,16 +72,19 @@ __suvadu_detect_executor() {
     elif [[ -n "$COPILOT_WORKSPACE" ]]; then
         executor_type="agent"
         executor="copilot"
+    elif [[ "$CURSOR_AGENT" == "1" ]]; then
+        executor_type="agent"
+        executor="cursor"
     # IDE Detection
     elif [[ -n "$WINDSURF" ]] || [[ -n "$CODEIUM" ]]; then
         executor_type="ide"
         executor="windsurf"
-    elif [[ "$TERM_PROGRAM" == "vscode" ]] || [[ -n "$VSCODE_INJECTION" ]]; then
-        executor_type="ide"
-        executor="vscode"
     elif [[ -n "$CURSOR_INJECTION" ]] || [[ -n "$CURSOR_TRACE_ID" ]]; then
         executor_type="ide"
         executor="cursor"
+    elif [[ "$TERM_PROGRAM" == "vscode" ]] || [[ -n "$VSCODE_INJECTION" ]]; then
+        executor_type="ide"
+        executor="vscode"
     elif [[ -n "$ANTIGRAVITY_AGENT" ]]; then
         executor_type="ide"
         executor="antigravity"

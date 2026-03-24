@@ -33,6 +33,10 @@ pub fn parse_date_input(input: &str, is_end_of_day: bool) -> Option<i64> {
         Local::now().date_naive()
     } else if input == "yesterday" {
         Local::now().date_naive().pred_opt()?
+    } else if let Some(days) = parse_relative_days(&input) {
+        Local::now()
+            .date_naive()
+            .checked_sub_signed(chrono::Duration::days(days))?
     } else {
         NaiveDate::parse_from_str(&input, "%Y-%m-%d").ok()?
     };
@@ -47,6 +51,17 @@ pub fn parse_date_input(input: &str, is_end_of_day: bool) -> Option<i64> {
     let dt_local = Local.from_local_datetime(&dt).single()?;
 
     Some(dt_local.timestamp_millis())
+}
+
+/// Parse relative date strings like "7 days ago", "3 days ago", "1 day ago".
+fn parse_relative_days(input: &str) -> Option<i64> {
+    let input = input.trim();
+    // Match: "<N> day(s) ago"
+    let rest = input.strip_suffix(" ago")?;
+    let rest = rest
+        .strip_suffix(" days")
+        .or_else(|| rest.strip_suffix(" day"))?;
+    rest.trim().parse::<i64>().ok().filter(|&n| n > 0)
 }
 
 #[cfg(test)]
@@ -67,5 +82,26 @@ mod tests {
     fn test_parse_keywords() {
         assert!(parse_date_input("today", false).is_some());
         assert!(parse_date_input("yesterday", true).is_some());
+    }
+
+    #[test]
+    fn test_parse_relative_days() {
+        assert!(parse_date_input("7 days ago", false).is_some());
+        assert!(parse_date_input("1 day ago", false).is_some());
+        assert!(parse_date_input("30 days ago", false).is_some());
+        assert!(parse_date_input("3 days ago", true).is_some());
+
+        // 7 days ago should be before yesterday
+        let seven = parse_date_input("7 days ago", false).unwrap();
+        let yesterday = parse_date_input("yesterday", false).unwrap();
+        assert!(seven < yesterday);
+    }
+
+    #[test]
+    fn test_parse_relative_invalid() {
+        assert!(parse_date_input("0 days ago", false).is_none());
+        assert!(parse_date_input("-1 days ago", false).is_none());
+        assert!(parse_date_input("days ago", false).is_none());
+        assert!(parse_date_input("seven days ago", false).is_none());
     }
 }

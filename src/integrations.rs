@@ -214,6 +214,125 @@ pub fn handle_hook_claude_code_failure() -> Result<(), Box<dyn std::error::Error
     })
 }
 
+/// Handle `afterShellExecution` hook from Cursor — reads JSON event from stdin and records the command.
+///
+/// Cursor's payload: `{ "command": "...", "output": "...", "exit_code": 0, "cwd": "...",
+///   "duration": 123, "conversation_id": "...", "generation_id": "..." }`
+pub fn handle_hook_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .take(MAX_HOOK_INPUT_BYTES)
+        .read_to_string(&mut input)?;
+
+    let event: serde_json::Value = serde_json::from_str(&input)?;
+
+    let command = event
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if command.is_empty() {
+        return Ok(());
+    }
+
+    let cwd = event
+        .get("cwd")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(".");
+
+    let exit_code = event
+        .get("exit_code")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|ec| i32::try_from(ec).ok())
+        .or(Some(0));
+
+    let duration_ms = event
+        .get("duration")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+
+    // Use conversation_id as session, prefixed to avoid collision
+    let session_id = event
+        .get("conversation_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| is_valid_session_id(s))
+        .map_or_else(
+            || format!("cursor-{}", uuid::Uuid::new_v4()),
+            |s| format!("cursor-{s}"),
+        );
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let started_at = now - duration_ms;
+
+    // Read cached prompt for this session (set by beforeSubmitPrompt hook)
+    let context = get_cached_prompt(&session_id).map(|prompt| {
+        let mut ctx = HashMap::new();
+        ctx.insert("agent_prompt".to_string(), prompt);
+        ctx
+    });
+
+    crate::commands::entry::handle_add_with_context(crate::commands::entry::AddParams {
+        session_id,
+        command: command.to_string(),
+        cwd: cwd.to_string(),
+        exit_code,
+        started_at,
+        ended_at: now,
+        executor_type: Some("agent".to_string()),
+        executor: Some("cursor".to_string()),
+        context,
+    })
+}
+
+/// Handle `beforeSubmitPrompt` hook from Cursor — caches the user prompt.
+///
+/// Payload: `{ "prompt": "...", "conversation_id": "...", ... }`
+/// Must return `{"continue": true}` on stdout to let Cursor proceed.
+pub fn handle_hook_cursor_prompt() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .take(MAX_HOOK_INPUT_BYTES)
+        .read_to_string(&mut input)?;
+
+    let event: serde_json::Value = serde_json::from_str(&input)?;
+
+    let conversation_id = event
+        .get("conversation_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if !is_valid_session_id(conversation_id) {
+        println!("{{\"continue\":true}}");
+        return Ok(());
+    }
+
+    let prompt = event
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+
+    if !prompt.is_empty() {
+        let session_id = format!("cursor-{conversation_id}");
+        let prompts_dir = get_prompts_dir()?;
+        std::fs::create_dir_all(&prompts_dir)?;
+        let prompt_file = prompts_dir.join(format!("{session_id}.prompt"));
+        let truncated = crate::util::truncate_str(prompt, 500, "...");
+        atomic_write(&prompt_file, &truncated)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&prompt_file, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+
+    // Must respond to let Cursor proceed
+    println!("{{\"continue\":true}}");
+    Ok(())
+}
+
 /// Parse an exit code from Claude Code's error string.
 /// Examples: "Command exited with non-zero status code 1", "status code 127"
 fn parse_exit_code_from_error(error: &str) -> Option<i32> {
@@ -745,7 +864,167 @@ pub fn handle_init_opencode() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Unified init handler for terminal-based IDE integrations (Cursor, Antigravity, etc.).
+/// Set up Cursor AI agent integration via `afterShellExecution` hook.
+pub fn handle_init_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let current_exe = std::env::current_exe()?;
+    let bin_path = current_exe.to_string_lossy().to_string();
+
+    // Create hooks directory
+    let home = std::env::var("HOME")?;
+    let hooks_dir = PathBuf::from(&home)
+        .join(".config")
+        .join("suvadu")
+        .join("hooks");
+    std::fs::create_dir_all(&hooks_dir)?;
+
+    let escaped_bin = shell_escape(&bin_path);
+
+    // Write the afterShellExecution hook script
+    let hook_script_path = hooks_dir.join("cursor-after-shell.sh");
+    let script = format!(
+        "#!/bin/bash\n\
+         # Suvadu — Cursor afterShellExecution Hook\n\
+         # Records AI-executed commands in your shell history\n\
+         # Generated by: suv init cursor\n\
+         exec {escaped_bin} hook-cursor 2>/dev/null\n"
+    );
+    crate::util::atomic_write_with_mode(&hook_script_path, &script, 0o700)?;
+
+    // Write the beforeSubmitPrompt hook script
+    let prompt_hook_path = hooks_dir.join("cursor-prompt.sh");
+    let prompt_script = format!(
+        "#!/bin/bash\n\
+         # Suvadu — Cursor beforeSubmitPrompt Hook\n\
+         # Captures the user prompt for agent command grouping\n\
+         # Generated by: suv init cursor\n\
+         exec {escaped_bin} hook-cursor-prompt 2>/dev/null\n"
+    );
+    crate::util::atomic_write_with_mode(&prompt_hook_path, &prompt_script, 0o700)?;
+
+    let hook_path_str = hook_script_path.to_string_lossy().to_string();
+    let prompt_hook_path_str = prompt_hook_path.to_string_lossy().to_string();
+
+    // Try auto-merge into ~/.cursor/hooks.json
+    let cursor_dir = PathBuf::from(&home).join(".cursor");
+    std::fs::create_dir_all(&cursor_dir)?;
+    let hooks_json_path = cursor_dir.join("hooks.json");
+
+    let auto_configured =
+        try_merge_cursor_hooks(&hooks_json_path, &hook_path_str, &prompt_hook_path_str);
+
+    let color = crate::util::color_enabled();
+    let (b, r) = if color {
+        ("\x1b[1m", "\x1b[0m")
+    } else {
+        ("", "")
+    };
+    let green = if color { "\x1b[32m" } else { "" };
+    let cyan = if color { "\x1b[36m" } else { "" };
+
+    println!("{b}Suvadu \u{2014} Cursor Integration{r}");
+    println!();
+    println!("Hook scripts installed:");
+    println!("  {hook_path_str}");
+    println!("  {prompt_hook_path_str}");
+    println!();
+
+    if matches!(auto_configured, Ok(true)) {
+        println!(
+            "{green}\u{2713}{r} Settings auto-configured: {}",
+            hooks_json_path.display()
+        );
+        println!();
+        println!("Restart Cursor to activate.");
+    } else {
+        println!("Add this to ~/.cursor/hooks.json:");
+        println!();
+        println!(
+            "{}",
+            generate_cursor_hooks_snippet(&hook_path_str, &prompt_hook_path_str)
+        );
+        println!();
+        println!("Then restart Cursor to activate.");
+    }
+
+    println!();
+    println!("Verify with: {cyan}suv search --executor cursor{r}");
+
+    Ok(())
+}
+
+/// Generate the JSON snippet for Cursor hooks.json.
+fn generate_cursor_hooks_snippet(hook_path: &str, prompt_hook_path: &str) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "version": 1,
+        "hooks": {
+            "afterShellExecution": [{
+                "command": hook_path
+            }],
+            "beforeSubmitPrompt": [{
+                "command": prompt_hook_path
+            }]
+        }
+    }))
+    .unwrap_or_default()
+}
+
+/// Try to merge Suvadu hooks into an existing Cursor hooks.json.
+fn try_merge_cursor_hooks(
+    hooks_path: &Path,
+    hook_path: &str,
+    prompt_hook_path: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut settings: serde_json::Value = if hooks_path.exists() {
+        let content = std::fs::read_to_string(hooks_path)?;
+        serde_json::from_str(&content)?
+    } else {
+        serde_json::json!({})
+    };
+
+    // Ensure top-level structure
+    let obj = settings
+        .as_object_mut()
+        .ok_or("hooks.json root is not an object")?;
+    obj.entry("version").or_insert(serde_json::json!(1));
+    let hooks = obj.entry("hooks").or_insert_with(|| serde_json::json!({}));
+    let hooks_obj = hooks.as_object_mut().ok_or("hooks is not an object")?;
+
+    // Add afterShellExecution hook if missing
+    add_cursor_hook_if_missing(hooks_obj, "afterShellExecution", hook_path)?;
+    // Add beforeSubmitPrompt hook if missing
+    add_cursor_hook_if_missing(hooks_obj, "beforeSubmitPrompt", prompt_hook_path)?;
+
+    let updated = serde_json::to_string_pretty(&settings)?;
+    atomic_write(hooks_path, &updated)?;
+    Ok(true)
+}
+
+/// Add a suvadu hook entry to a Cursor hooks object if not already present.
+fn add_cursor_hook_if_missing(
+    hooks_obj: &mut serde_json::Map<String, serde_json::Value>,
+    hook_type: &str,
+    hook_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let arr = hooks_obj
+        .entry(hook_type)
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| format!("{hook_type} is not an array"))?;
+
+    let already_has = arr.iter().any(|entry| {
+        entry
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(is_suvadu_hook_command)
+    });
+
+    if !already_has {
+        arr.push(serde_json::json!({ "command": hook_path }));
+    }
+    Ok(())
+}
+
+/// Unified init handler for terminal-based IDE integrations (Antigravity, etc.).
 ///
 /// These IDEs are detected via environment variables set in their integrated terminals.
 /// Suvadu's shell hooks automatically pick them up — this command just verifies the setup.

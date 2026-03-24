@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 - **Prompt Explorer** — new two-screen TUI (`suv agent prompts` or press `p` in the agent dashboard) to browse agent prompts and drill into the commands they triggered. Right-side preview shows full prompt text, session, executor, path, timestamps, and success/fail stats. Supports `Ctrl+Y` to copy commands and `s` to jump to session timeline.
 - **`suv agent prompts` CLI** — direct shortcut to launch the Prompt Explorer with `--after`, `--executor`, and `--here` flags.
 - **PostToolUseFailure hook** — captures failed Claude Code commands with parsed exit codes. Run `suv init claude-code` to install the new hook.
+- **Cursor agent integration** — `suv init cursor` installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Captures Cursor AI agent commands with exit codes, prompts, and session grouping.
+- **Relative date parsing** — date inputs now support `"N days ago"` (e.g. `--after "7 days ago"`) in addition to `"today"`, `"yesterday"`, and `"YYYY-MM-DD"`.
 - **Executor selector in search filter** — the executor field (`Ctrl+F` → field 5) is now an Up/Down selector showing actual executors from the database instead of free-text input.
 - **Session picker improvements** — live search bar (type to filter by session ID or tag), `Ctrl+F` filter popup with Tag/Start Date/End Date fields (matching `suv search` design), full session ID display (40% width), first/last command timestamps.
 - **Session timeline header** — shows full session ID and first/last command timestamps on two lines.
@@ -18,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - **Claude Code exit codes** — `PostToolUse` now defaults to exit code 0 (the hook only fires on success). Previously all agent commands were stored with NULL exit codes.
 - **Missing recent entries in agent views** — `load_entries` no longer truncates recent agent entries when total entry count exceeds the 10k SQL limit.
 - **Session ID display** — strip agent prefixes (`claude-`, `opencode-`, `cursor-`) before truncating for display.
+- **Cursor executor detection** — Cursor agent commands (via `$CURSOR_AGENT`) are now detected as `executor_type="agent"`. Cursor IDE terminal check moved before VS Code to avoid misidentification (Cursor sets `TERM_PROGRAM=vscode`).
 
 ### Changed
 - **Prompt stats** — `None` exit codes (common for agent commands) are treated as unknown, not failed. Status column shows `✔N ✘N` counts instead of a misleading percentage.
