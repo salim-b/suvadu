@@ -104,10 +104,10 @@ pub(super) fn entry_row_styles(
         EntryRowStyles {
             bg: sel,
             time: sel.fg(t.selection_fg).add_modifier(Modifier::BOLD),
-            session: sel.fg(t.info).add_modifier(Modifier::BOLD),
-            executor: sel.fg(t.warning).add_modifier(Modifier::BOLD),
+            session: sel.fg(t.primary_dim).add_modifier(Modifier::BOLD),
+            executor: sel.fg(t.badge_executor).add_modifier(Modifier::BOLD),
             path: if is_local {
-                sel.fg(t.primary).add_modifier(Modifier::BOLD)
+                sel.fg(t.badge_path).add_modifier(Modifier::BOLD)
             } else {
                 sel.fg(t.selection_fg)
             },
@@ -118,10 +118,10 @@ pub(super) fn entry_row_styles(
         EntryRowStyles {
             bg: base,
             time: base.fg(t.text_muted),
-            session: base.fg(t.info),
-            executor: base.fg(t.warning),
+            session: base.fg(t.primary_dim),
+            executor: base.fg(t.badge_executor),
             path: if is_local {
-                base.fg(t.primary)
+                base.fg(t.badge_path)
             } else {
                 base.fg(t.text_secondary)
             },

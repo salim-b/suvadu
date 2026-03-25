@@ -621,7 +621,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut AppState) {
 
     let mut help_badges = match app.input_mode {
         InputMode::Normal => vec![
-            Span::styled(" q ", badge_key),
+            Span::styled(" q/Esc ", badge_key),
             Span::styled(" Quit  ", badge_label),
             Span::styled(" s ", badge_key),
             Span::styled(" Save  ", badge_label),

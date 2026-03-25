@@ -169,9 +169,9 @@ impl Repository {
         let mut fb = filter.to_filter_builder();
 
         let order = if sort_alphabetically {
-            "e.command ASC"
+            "g.occurrence_count DESC, e.command ASC"
         } else {
-            "recent_start DESC"
+            "g.occurrence_count DESC, recent_start DESC"
         };
 
         // Use a subquery to deterministically select the most recent row per command.
