@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/suvadu-logo.svg" alt="Suvadu" width="180">
 </p>
-<p align="center"><strong>Total recall for your terminal.</strong></p>
+<p align="center"><strong>Total recall for your terminal. Shared memory for your AI agents.</strong></p>
 <p align="center">
   <a href="https://github.com/AppachiTech/suvadu/actions/workflows/ci.yml"><img src="https://github.com/AppachiTech/suvadu/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://crates.io/crates/suvadu"><img src="https://img.shields.io/crates/v/suvadu.svg" alt="crates.io"></a>
@@ -9,19 +9,44 @@
   <a href="https://github.com/AppachiTech/suvadu/releases"><img src="https://img.shields.io/github/v/release/AppachiTech/suvadu?label=latest" alt="Latest Release"></a>
 </p>
 
-Suvadu (Tamil: "Trace" / "Footprint") replaces your shell's built-in history with a SQLite-backed store, giving you structured storage, millisecond-precision timestamps, and a modern interactive search UI — across every terminal, IDE, and AI agent you use.
+<p align="center">
+  <img src="demo/hero.gif" alt="Suvadu — search history, browse AI agent prompts" width="700">
+</p>
+
+**Suvadu** replaces your shell history with a SQLite-backed store. Every command gets structured context — exit code, duration, directory, executor, session. AI agents can query it via MCP. 100% local.
+
+- **<2ms** recording overhead, **<10ms** search across 1M+ entries
+- **AI agent tracking** — auto-detects Claude Code, Cursor, Antigravity, Codex, Aider
+- **Prompt Explorer** — trace every command back to the prompt that triggered it
+- **MCP Server** — AI agents query your history directly (`what_changed`, `what_failed`, `suggest_next`)
+- **100% local** — no cloud, no telemetry, no account. MIT licensed.
+
+```bash
+brew tap AppachiTech/suvadu && brew install suvadu
+echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
+suv status   # verify it's working
+```
+
+> **Website:** [appachi.tech/suvadu](https://www.appachi.tech/suvadu) · **GitHub:** [AppachiTech/suvadu](https://github.com/AppachiTech/suvadu)
+
+---
+
+<details>
+<summary><strong>More demos</strong></summary>
 
 <p align="center">
-  <img src="demo/suvadu-search.gif" alt="Suvadu search TUI with fuzzy matching, filters, stats heatmap and settings" width="700">
+  <img src="demo/suvadu-search.gif" alt="Suvadu search TUI" width="700">
   <br>
   <em>Search, stats & settings</em>
 </p>
 
 <p align="center">
-  <img src="demo/suvadu-agent.gif" alt="Suvadu agent monitoring dashboard showing AI command tracking and risk assessment" width="700">
+  <img src="demo/suvadu-agent.gif" alt="Suvadu agent dashboard" width="700">
   <br>
-  <em>Agent stats & dashboard — track what your AI agents execute</em>
+  <em>Agent dashboard — track what your AI agents execute</em>
 </p>
+
+</details>
 
 ---
 
@@ -120,6 +145,7 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - **Prompt Explorer** — browse agent prompts and drill into the commands they triggered (`suv agent prompts` or `p` in dashboard)
 - **Agent stats** — per-agent analytics with top commands, directories, and risk breakdown
 - **Agent report** — export activity as text, markdown, or JSON
+- **MCP Server** — AI agents query your shell history directly via `suv mcp-serve`. 10 tools including `what_changed`, `what_failed`, and `suggest_next` for agent-to-agent shared memory. 100% local.
 - **Claude Code integration** — `suv init claude-code` captures AI-executed commands and prompts via PostToolUse, PostToolUseFailure, and UserPromptSubmit hooks
 - **Cursor integration** — `suv init cursor` captures AI agent commands and prompts via afterShellExecution and beforeSubmitPrompt hooks
 - **Antigravity integration** — auto-detects agent commands via `$ANTIGRAVITY_AGENT` (prompts not available — no hooks system)
@@ -382,7 +408,7 @@ suv agent report --format json | jq .
 |-----|--------|
 | `Up` / `Down` | Navigate timeline |
 | `Tab` | Toggle detail pane |
-| `1` / `2` / `3` / `4` | Period: 7d / 30d / 90d / All |
+| `1` / `2` / `3` / `4` | Period: Today / 7d / 30d / All |
 | `a` | Cycle agent filter |
 | `r` | Toggle risk-only filter (medium+ risk) |
 | `p` | Open Prompt Explorer |
@@ -566,7 +592,7 @@ exclusions = ["^ls$", "^pwd$", "^cd$"]
 suv init claude-code
 ```
 
-Installs PostToolUse and PostToolUseFailure hooks and configures `~/.claude/settings.json`. Captures both successful and failed commands with exit codes. Restart Claude Code after setup.
+Installs PostToolUse, PostToolUseFailure, and UserPromptSubmit hooks. Also auto-configures the MCP server in `~/.claude.json`. Captures commands, exit codes, and prompts. Restart Claude Code after setup.
 
 ### Cursor
 
@@ -574,7 +600,7 @@ Installs PostToolUse and PostToolUseFailure hooks and configures `~/.claude/sett
 suv init cursor
 ```
 
-Installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Captures AI agent commands with exit codes and prompts for agent command grouping. Also auto-detects Cursor's integrated terminal via `$CURSOR_AGENT` and `$CURSOR_INJECTION` environment variables. Restart Cursor after setup.
+Installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Also auto-configures the MCP server in `~/.cursor/mcp.json`. Captures commands, exit codes, and prompts. Restart Cursor after setup.
 
 ### Antigravity
 
@@ -612,6 +638,37 @@ suv search --executor cursor        # Cursor
 suv search --executor antigravity   # Antigravity
 suv search --executor opencode      # OpenCode
 ```
+
+### MCP Server (Agent Memory)
+
+Suvadu includes an MCP server that lets AI agents query your shell history directly. It's auto-configured when you run `suv init claude-code` or `suv init cursor`.
+
+**10 tools available to agents:**
+
+| Tool | Purpose |
+|------|---------|
+| `search_commands` | Search history by text, directory, executor, date |
+| `recent_commands` | What happened recently in a directory |
+| `command_status` | Has this command been run before? What happened? |
+| `get_prompts` | Browse prompts and the commands they triggered |
+| `session_history` | Full command history of a session |
+| `get_stats` | Aggregate statistics (top commands, success rate) |
+| `list_sessions` | Browse recent sessions |
+| `what_changed` | What file-modifying operations happened recently |
+| `what_failed` | What failed and which prompt caused it |
+| `suggest_next` | Predict next commands based on frecency |
+
+**Manual setup** (if not using `suv init`):
+
+```bash
+# Claude Code
+claude mcp add --transport stdio suvadu -- suv mcp-serve
+
+# Cursor — add to ~/.cursor/mcp.json:
+# { "mcpServers": { "suvadu": { "command": "suv", "args": ["mcp-serve"] } } }
+```
+
+Then ask your agent: *"What commands failed in this project recently?"*
 
 ---
 
@@ -699,7 +756,7 @@ Shell hooks use native `$EPOCHREALTIME` (Zsh 5.1+ / Bash 5+) for millisecond-pre
 | `suv gc` | Garbage collect orphaned data and compact DB |
 | `suv session` | Interactive session timeline TUI |
 | **Recording Control** | |
-| `suv status` | Show recording status |
+| `suv status` | Show recording status, command count, detected agents |
 | `suv enable` / `suv disable` | Toggle recording |
 | `suv pause` | Pause current session |
 | `suv settings` | Interactive settings TUI |
@@ -717,6 +774,7 @@ Shell hooks use native `$EPOCHREALTIME` (Zsh 5.1+ / Bash 5+) for millisecond-pre
 | `suv init cursor` | Set up Cursor tracking |
 | `suv init antigravity` | Set up Antigravity tracking |
 | `suv init opencode` | Set up OpenCode capture |
+| `suv mcp-serve` | Start MCP server for AI agent access to shell history |
 | **Utilities** | |
 | `suv completions <shell>` | Generate shell completions (zsh, bash, fish) |
 | `suv man` | Generate man page |
