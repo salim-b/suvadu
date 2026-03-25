@@ -23,6 +23,9 @@ pub fn list_tools(id: &Value) -> Value {
                 session_history_def(),
                 get_stats_def(),
                 list_sessions_def(),
+                what_changed_def(),
+                what_failed_def(),
+                suggest_next_def(),
             ]
         }
     })
@@ -38,6 +41,9 @@ pub fn call_tool(repo: &Repository, name: &str, args: &Value) -> Result<String, 
         "session_history" => handle_session_history(repo, args),
         "get_stats" => handle_get_stats(repo, args),
         "list_sessions" => handle_list_sessions(repo, args),
+        "what_changed" => handle_what_changed(repo, args),
+        "what_failed" => handle_what_failed(repo, args),
+        "suggest_next" => handle_suggest_next(repo, args),
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -149,6 +155,50 @@ fn list_sessions_def() -> Value {
             "properties": {
                 "limit": { "type": "integer", "description": "Max sessions (default: 10)", "default": 10 },
                 "tag": { "type": "string", "description": "Filter by tag name" }
+            }
+        }
+    })
+}
+
+fn what_changed_def() -> Value {
+    json!({
+        "name": "what_changed",
+        "description": "Analyze what file-modifying operations happened in a directory recently. Classifies commands into categories: file writes, deletions, git operations, package installs, config changes. Use this to understand what an agent or user changed before you start working.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "description": "Directory to analyze (defaults to all)" },
+                "hours": { "type": "integer", "description": "How many hours back to look (default: 4)", "default": 4 },
+                "executor": { "type": "string", "description": "Filter by executor (e.g. claude-code, cursor)" }
+            }
+        }
+    })
+}
+
+fn what_failed_def() -> Value {
+    json!({
+        "name": "what_failed",
+        "description": "Show recent command failures with the prompts that caused them. Groups failures by the AI prompt or session that triggered them, so you can understand what went wrong and avoid repeating the same mistakes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "description": "Filter to this directory" },
+                "hours": { "type": "integer", "description": "How many hours back to look (default: 24)", "default": 24 },
+                "limit": { "type": "integer", "description": "Max failures to show (default: 20)", "default": 20 }
+            }
+        }
+    })
+}
+
+fn suggest_next_def() -> Value {
+    json!({
+        "name": "suggest_next",
+        "description": "Predict what commands are likely to be run next based on recent history and current directory. Uses frecency (frequency + recency) to rank suggestions. Useful for understanding the typical workflow in a project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "description": "Directory context (defaults to all)" },
+                "limit": { "type": "integer", "description": "Number of suggestions (default: 10)", "default": 10 }
             }
         }
     })
@@ -548,15 +598,370 @@ fn handle_list_sessions(repo: &Repository, args: &Value) -> Result<String, Strin
     Ok(out)
 }
 
+// ── Smart tools ─────────────────────────────────────────────
+
+/// Classify a command into a change category for `what_changed`.
+fn classify_command(cmd: &str) -> Option<&'static str> {
+    let cmd = cmd.trim();
+    let first = cmd.split_whitespace().next().unwrap_or("");
+
+    // File deletions
+    if first == "rm" || first == "rmdir" || cmd.starts_with("rm ") {
+        return Some("deletions");
+    }
+    // File moves/renames
+    if first == "mv" {
+        return Some("moves/renames");
+    }
+    // File copies
+    if first == "cp" {
+        return Some("copies");
+    }
+    // File creation/writes
+    if first == "touch"
+        || first == "mkdir"
+        || first == "tee"
+        || cmd.contains(" > ")
+        || cmd.contains(" >> ")
+    {
+        return Some("file writes");
+    }
+    // Editors
+    if matches!(first, "vim" | "nvim" | "nano" | "vi" | "code" | "sed") {
+        return Some("file edits");
+    }
+    // Git operations
+    if first == "git" {
+        let sub = cmd.split_whitespace().nth(1).unwrap_or("");
+        return match sub {
+            "commit" | "merge" | "rebase" | "cherry-pick" | "revert" => Some("git commits"),
+            "push" | "pull" | "fetch" => Some("git sync"),
+            "checkout" | "switch" | "branch" => Some("git branches"),
+            "add" | "rm" | "reset" | "restore" | "stash" => Some("git staging"),
+            _ => None,
+        };
+    }
+    // Package installs
+    if matches!(
+        first,
+        "npm" | "yarn" | "pnpm" | "pip" | "pip3" | "cargo" | "brew" | "apt"
+    ) && cmd.contains("install")
+    {
+        return Some("package installs");
+    }
+    // Docker
+    if first == "docker" || first == "docker-compose" {
+        return Some("docker");
+    }
+    // Build commands
+    if matches!(first, "make" | "cmake" | "cargo") {
+        let sub = cmd.split_whitespace().nth(1).unwrap_or("");
+        if matches!(sub, "build" | "compile" | "release") {
+            return Some("builds");
+        }
+    }
+    // chmod/chown
+    if matches!(first, "chmod" | "chown") {
+        return Some("permission changes");
+    }
+    None
+}
+
+fn handle_what_changed(repo: &Repository, args: &Value) -> Result<String, String> {
+    let hours = get_int(args, "hours", 4);
+    let directory = get_str(args, "directory");
+    let executor = get_str(args, "executor");
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let after = Some(now - hours * 60 * 60 * 1000);
+
+    let qf = QueryFilter {
+        after,
+        before: None,
+        tag_id: None,
+        exit_code: None,
+        query: None,
+        prefix_match: false,
+        executor,
+        cwd: directory,
+        field: SearchField::Command,
+    };
+
+    let entries = repo
+        .get_entries_filtered(500, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    // Classify commands into categories
+    let mut categories: std::collections::HashMap<&str, Vec<&crate::models::Entry>> =
+        std::collections::HashMap::new();
+    let mut unclassified = 0usize;
+
+    for entry in &entries {
+        if let Some(category) = classify_command(&entry.command) {
+            categories.entry(category).or_default().push(entry);
+        } else {
+            unclassified += 1;
+        }
+    }
+
+    if categories.is_empty() {
+        let ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
+        return Ok(format!(
+            "No file-modifying operations found in the last {hours} hours{ctx}. ({} total commands, all read-only.)",
+            entries.len()
+        ));
+    }
+
+    let ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Changes in the last {hours} hours{ctx} ({} total commands):\n",
+        entries.len()
+    );
+
+    // Sort categories by count descending
+    let mut sorted: Vec<_> = categories.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    for (category, cmds) in &sorted {
+        let _ = writeln!(out, "  {} ({}):", category.to_uppercase(), cmds.len());
+        for cmd in cmds.iter().take(5) {
+            let exit = match cmd.exit_code {
+                Some(0) => "ok",
+                Some(_) => "FAIL",
+                None => "?",
+            };
+            let _ = writeln!(out, "    {} [{}]", cmd.command, exit);
+        }
+        if cmds.len() > 5 {
+            let _ = writeln!(out, "    ... and {} more", cmds.len() - 5);
+        }
+        out.push('\n');
+    }
+
+    if unclassified > 0 {
+        let _ = writeln!(
+            out,
+            "  ({unclassified} other commands not shown — read-only or unclassified)"
+        );
+    }
+
+    Ok(out)
+}
+
+fn handle_what_failed(repo: &Repository, args: &Value) -> Result<String, String> {
+    let hours = get_int(args, "hours", 24);
+    let limit = usize::try_from(get_int(args, "limit", 20)).unwrap_or(20);
+    let directory = get_str(args, "directory");
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let after = Some(now - hours * 60 * 60 * 1000);
+
+    // Get all entries in the time window, then filter to failures
+    let qf = QueryFilter {
+        after,
+        before: None,
+        tag_id: None,
+        exit_code: None,
+        query: None,
+        prefix_match: false,
+        executor: None,
+        cwd: directory,
+        field: SearchField::Command,
+    };
+
+    let entries = repo
+        .get_entries_filtered(1000, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    let failures: Vec<_> = entries
+        .iter()
+        .filter(|e| e.exit_code.is_some_and(|c| c != 0))
+        .take(limit)
+        .collect();
+
+    if failures.is_empty() {
+        let ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
+        return Ok(format!(
+            "No failures in the last {hours} hours{ctx}. {} commands all succeeded.",
+            entries.len()
+        ));
+    }
+
+    // Group failures by prompt (if available)
+    let mut by_prompt: std::collections::HashMap<String, Vec<&&crate::models::Entry>> =
+        std::collections::HashMap::new();
+    let mut no_prompt_failures: Vec<&&crate::models::Entry> = Vec::new();
+
+    for entry in &failures {
+        let prompt = entry
+            .context
+            .as_ref()
+            .and_then(|ctx| ctx.get("agent_prompt"))
+            .cloned();
+        if let Some(p) = prompt {
+            by_prompt.entry(p).or_default().push(entry);
+        } else {
+            no_prompt_failures.push(entry);
+        }
+    }
+
+    let ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{} failures in the last {hours} hours{ctx}:\n",
+        failures.len()
+    );
+
+    // Show prompt-grouped failures first
+    if !by_prompt.is_empty() {
+        let _ = writeln!(out, "FAILURES TRIGGERED BY PROMPTS:");
+        let mut sorted: Vec<_> = by_prompt.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+        for (prompt, cmds) in &sorted {
+            let _ = writeln!(out, "\n  Prompt: \"{prompt}\"");
+            let _ = writeln!(out, "  {} commands failed:", cmds.len());
+            for cmd in cmds.iter().take(5) {
+                let code = cmd.exit_code.unwrap_or(-1);
+                let _ = writeln!(
+                    out,
+                    "    exit {} | {} | {}",
+                    code,
+                    cmd.command,
+                    format_time(cmd.started_at)
+                );
+            }
+            if cmds.len() > 5 {
+                let _ = writeln!(out, "    ... and {} more", cmds.len() - 5);
+            }
+        }
+        out.push('\n');
+    }
+
+    // Show non-prompt failures
+    if !no_prompt_failures.is_empty() {
+        let _ = writeln!(out, "OTHER FAILURES (no prompt captured):");
+        for cmd in no_prompt_failures.iter().take(10) {
+            let code = cmd.exit_code.unwrap_or(-1);
+            let executor = cmd.executor.as_deref().unwrap_or("unknown");
+            let _ = writeln!(
+                out,
+                "  exit {} | {} | {} | {}",
+                code,
+                cmd.command,
+                executor,
+                format_time(cmd.started_at)
+            );
+        }
+        if no_prompt_failures.len() > 10 {
+            let _ = writeln!(out, "  ... and {} more", no_prompt_failures.len() - 10);
+        }
+    }
+
+    Ok(out)
+}
+
+fn handle_suggest_next(repo: &Repository, args: &Value) -> Result<String, String> {
+    let limit = usize::try_from(get_int(args, "limit", 10)).unwrap_or(10);
+    let directory = get_str(args, "directory");
+
+    // Get recent commands (last 7 days) to build frecency scores
+    let now = chrono::Utc::now().timestamp_millis();
+    let week_ago = now - 7 * 24 * 60 * 60 * 1000;
+
+    let qf = QueryFilter {
+        after: Some(week_ago),
+        before: None,
+        tag_id: None,
+        exit_code: None,
+        query: None,
+        prefix_match: false,
+        executor: None,
+        cwd: directory,
+        field: SearchField::Command,
+    };
+
+    let entries = repo
+        .get_entries_filtered(2000, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    if entries.is_empty() {
+        let ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
+        return Ok(format!(
+            "No recent commands found{ctx} to base suggestions on."
+        ));
+    }
+
+    // Score each unique command by frecency
+    // Score = sum(weight) where weight depends on recency tier
+    let mut scores: std::collections::HashMap<&str, (f64, usize, Option<i32>)> =
+        std::collections::HashMap::new(); // cmd -> (score, count, last_exit)
+
+    for entry in &entries {
+        #[allow(clippy::cast_precision_loss)]
+        let age_hours = (now - entry.started_at) as f64 / 3_600_000.0;
+        let weight = if age_hours < 1.0 {
+            16.0 // last hour
+        } else if age_hours < 24.0 {
+            8.0 // today
+        } else if age_hours < 72.0 {
+            4.0 // last 3 days
+        } else {
+            1.0 // older
+        };
+
+        let (score, count, last_exit) = scores.entry(&entry.command).or_insert((0.0, 0, None));
+        *score += weight;
+        *count += 1;
+        if last_exit.is_none() {
+            *last_exit = entry.exit_code;
+        }
+    }
+
+    // Sort by score descending
+    let mut sorted: Vec<_> = scores.into_iter().collect();
+    sorted.sort_by(|a, b| {
+        b.1 .0
+            .partial_cmp(&a.1 .0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    sorted.truncate(limit);
+
+    let ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
+    let mut out = String::new();
+    let _ = writeln!(out, "Suggested next commands{ctx} (based on frecency):\n");
+    for (i, (cmd, (score, count, last_exit))) in sorted.iter().enumerate() {
+        let exit_display = match last_exit {
+            Some(0) => "last: ok".to_string(),
+            Some(c) => format!("last: exit {c}"),
+            None => "last: ?".to_string(),
+        };
+        let _ = writeln!(
+            out,
+            "  {}. {} ({}x, score: {:.0}, {})",
+            i + 1,
+            cmd,
+            count,
+            score,
+            exit_display,
+        );
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_list_tools_has_all_seven() {
+    fn test_list_tools_has_all_ten() {
         let resp = list_tools(&json!(1));
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 10);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"search_commands"));
@@ -566,6 +971,9 @@ mod tests {
         assert!(names.contains(&"session_history"));
         assert!(names.contains(&"get_stats"));
         assert!(names.contains(&"list_sessions"));
+        assert!(names.contains(&"what_changed"));
+        assert!(names.contains(&"what_failed"));
+        assert!(names.contains(&"suggest_next"));
     }
 
     #[test]
@@ -806,5 +1214,176 @@ mod tests {
             text.contains("cargo test"),
             "should contain the command: {text}"
         );
+    }
+
+    // ── Smart tool tests ────────────────────────────────────
+
+    #[test]
+    fn test_what_changed_empty_db() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "what_changed", &json!({}));
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("No file-modifying operations"));
+    }
+
+    #[test]
+    fn test_what_changed_classifies_commands() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let session = crate::models::Session {
+            id: "s1".to_string(),
+            hostname: "test".to_string(),
+            created_at: chrono::Utc::now().timestamp_millis(),
+            tag_id: None,
+        };
+        repo.insert_session(&session).unwrap();
+
+        let now = chrono::Utc::now().timestamp_millis();
+        for (i, cmd) in ["rm -rf tmp/", "git commit -m 'fix'", "npm install express"]
+            .iter()
+            .enumerate()
+        {
+            let entry = crate::models::Entry::new(
+                "s1".to_string(),
+                cmd.to_string(),
+                "/project".to_string(),
+                Some(0),
+                now - (i as i64 * 1000),
+                now - (i as i64 * 1000) + 100,
+            );
+            repo.insert_entry(&entry).unwrap();
+        }
+
+        let result = call_tool(&repo, "what_changed", &json!({"hours": 1}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(text.contains("DELETIONS"), "should classify rm: {text}");
+        assert!(
+            text.contains("GIT COMMITS"),
+            "should classify git commit: {text}"
+        );
+        assert!(
+            text.contains("PACKAGE INSTALLS"),
+            "should classify npm install: {text}"
+        );
+    }
+
+    #[test]
+    fn test_what_failed_empty_db() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "what_failed", &json!({}));
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("No failures"));
+    }
+
+    #[test]
+    fn test_what_failed_with_failures() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let session = crate::models::Session {
+            id: "s1".to_string(),
+            hostname: "test".to_string(),
+            created_at: chrono::Utc::now().timestamp_millis(),
+            tag_id: None,
+        };
+        repo.insert_session(&session).unwrap();
+
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut entry = crate::models::Entry::new(
+            "s1".to_string(),
+            "cargo test".to_string(),
+            "/project".to_string(),
+            Some(1),
+            now - 1000,
+            now,
+        );
+        let mut ctx = std::collections::HashMap::new();
+        ctx.insert("agent_prompt".to_string(), "run the tests".to_string());
+        entry.context = Some(ctx);
+        entry.executor_type = Some("agent".to_string());
+        entry.executor = Some("claude-code".to_string());
+        repo.insert_entry(&entry).unwrap();
+
+        let result = call_tool(&repo, "what_failed", &json!({}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(text.contains("1 failure"), "should count failure: {text}");
+        assert!(text.contains("run the tests"), "should show prompt: {text}");
+        assert!(text.contains("cargo test"), "should show command: {text}");
+    }
+
+    #[test]
+    fn test_suggest_next_empty_db() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "suggest_next", &json!({}));
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("No recent commands"));
+    }
+
+    #[test]
+    fn test_suggest_next_with_data() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let session = crate::models::Session {
+            id: "s1".to_string(),
+            hostname: "test".to_string(),
+            created_at: chrono::Utc::now().timestamp_millis(),
+            tag_id: None,
+        };
+        repo.insert_session(&session).unwrap();
+
+        let now = chrono::Utc::now().timestamp_millis();
+        // Run "cargo test" 5 times, "ls" once
+        for i in 0..5 {
+            let entry = crate::models::Entry::new(
+                "s1".to_string(),
+                "cargo test".to_string(),
+                "/project".to_string(),
+                Some(0),
+                now - (i * 60_000),
+                now - (i * 60_000) + 100,
+            );
+            repo.insert_entry(&entry).unwrap();
+        }
+        let entry = crate::models::Entry::new(
+            "s1".to_string(),
+            "ls".to_string(),
+            "/project".to_string(),
+            Some(0),
+            now - 300_000,
+            now - 300_000 + 100,
+        );
+        repo.insert_entry(&entry).unwrap();
+
+        let result = call_tool(&repo, "suggest_next", &json!({}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("cargo test"),
+            "should suggest cargo test: {text}"
+        );
+        // cargo test should be ranked higher than ls (more frequent + recent)
+        let cargo_pos = text.find("cargo test").unwrap();
+        let ls_pos = text.find("ls").unwrap();
+        assert!(
+            cargo_pos < ls_pos,
+            "cargo test should rank above ls: {text}"
+        );
+    }
+
+    #[test]
+    fn test_classify_command() {
+        assert_eq!(classify_command("rm -rf /tmp"), Some("deletions"));
+        assert_eq!(classify_command("mv a.txt b.txt"), Some("moves/renames"));
+        assert_eq!(classify_command("git commit -m 'fix'"), Some("git commits"));
+        assert_eq!(classify_command("git push origin main"), Some("git sync"));
+        assert_eq!(
+            classify_command("npm install express"),
+            Some("package installs")
+        );
+        assert_eq!(
+            classify_command("chmod 755 script.sh"),
+            Some("permission changes")
+        );
+        assert_eq!(classify_command("ls -la"), None);
+        assert_eq!(classify_command("cat file.txt"), None);
+        assert_eq!(classify_command("grep TODO src/"), None);
     }
 }
