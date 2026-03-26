@@ -18,7 +18,7 @@
 - **<2ms** recording overhead, **<10ms** search across 1M+ entries
 - **AI agent tracking** — auto-detects Claude Code, Cursor, Antigravity, Codex, Aider
 - **Prompt Explorer** — trace every command back to the prompt that triggered it
-- **MCP Server** — AI agents query your history directly (`what_changed`, `what_failed`, `assess_risk`)
+- **MCP Server** — AI agents get history context automatically + 11 tools including `assess_risk` for safety checks
 - **100% local** — no cloud, no telemetry, no account. MIT licensed.
 
 ```bash
@@ -641,9 +641,20 @@ suv search --executor opencode      # OpenCode
 
 ### MCP Server (Agent Memory)
 
-Suvadu includes an MCP server that lets AI agents query your shell history directly. It's auto-configured when you run `suv init claude-code` or `suv init cursor`.
+Suvadu includes an MCP server that gives AI agents direct access to your shell history. Auto-configured when you run `suv init claude-code` or `suv init cursor`.
 
-**11 tools available to agents:**
+**Resources** (injected into agent context automatically):
+
+| Resource | Content |
+|----------|---------|
+| `suvadu://history/recent` | Last 20 commands with exit codes |
+| `suvadu://failures/recent` | Recent failures grouped by prompt |
+| `suvadu://stats/today` | Today's command count, success rate, top commands |
+| `suvadu://risk/summary` | Risk assessment of recent commands |
+| `suvadu://agents/activity` | Per-agent breakdown (commands, success rate) |
+| `suvadu://history/session/{id}` | Full session history (template) |
+
+**11 tools** (called by agents during reasoning):
 
 | Tool | Purpose |
 |------|---------|

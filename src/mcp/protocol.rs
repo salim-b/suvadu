@@ -14,7 +14,8 @@ pub fn handle_initialize(id: &Value) -> Value {
         "result": {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {
-                "tools": { "listChanged": false }
+                "tools": { "listChanged": false },
+                "resources": { "subscribe": false, "listChanged": false }
             },
             "serverInfo": {
                 "name": "suvadu-mcp",

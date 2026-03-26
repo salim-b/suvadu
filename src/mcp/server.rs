@@ -3,6 +3,7 @@ use std::io::{self, BufRead, Write};
 use crate::repository::Repository;
 
 use super::protocol;
+use super::resources;
 use super::tools;
 
 /// Run the MCP server: read JSON-RPC from stdin, write responses to stdout.
@@ -51,6 +52,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
                 Some(handle_tool_call(&repo, rid, &request))
             }
+            "resources/list" => {
+                let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
+                Some(resources::list_resources(rid))
+            }
+            "resources/templates/list" => {
+                let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
+                Some(resources::list_resource_templates(rid))
+            }
+            "resources/read" => {
+                let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
+                Some(handle_resource_read(&repo, rid, &request))
+            }
             "ping" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
                 Some(protocol::handle_ping(rid))
@@ -87,6 +100,22 @@ fn handle_tool_call(
     match tools::call_tool(repo, name, args) {
         Ok(text) => protocol::tool_result(id, &text),
         Err(msg) => protocol::tool_error(id, &msg),
+    }
+}
+
+fn handle_resource_read(
+    repo: &Repository,
+    id: &serde_json::Value,
+    request: &serde_json::Value,
+) -> serde_json::Value {
+    let uri = request["params"]["uri"].as_str().unwrap_or("");
+    match resources::read_resource(repo, uri) {
+        Ok(result) => serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result
+        }),
+        Err(msg) => protocol::error_response(id, -32602, &msg),
     }
 }
 
