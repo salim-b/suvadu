@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [0.2.0] - 2026-03-25
 
 ### Added
-- **MCP Server** — `suv mcp-serve` exposes shell history to AI agents via the Model Context Protocol. 10 tools: `search_commands`, `recent_commands`, `command_status`, `get_prompts`, `session_history`, `get_stats`, `list_sessions`, plus 3 smart insight tools: `what_changed` (classifies file-modifying operations), `what_failed` (groups failures by the prompt that caused them), and `suggest_next` (frecency-based command prediction). 100% local, read-only, no network.
+- **MCP Server** — `suv mcp-serve` exposes shell history to AI agents via the Model Context Protocol. 11 tools: `search_commands`, `recent_commands`, `command_status`, `get_prompts`, `session_history`, `get_stats`, `list_sessions`, 3 smart insight tools (`what_changed`, `what_failed`, `suggest_next`), and `assess_risk` for pre-execution safety checks. 100% local, read-only, no network.
 - **MCP auto-configuration** — `suv init claude-code` and `suv init cursor` now automatically register the MCP server in `~/.claude.json` and `~/.cursor/mcp.json`. Zero extra setup for agent memory.
 - **Cursor agent integration** — `suv init cursor` installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Captures AI agent commands with exit codes and prompts.
 - **Post-install tips** — all `suv init` commands now show actionable next steps (`suv agent prompts`, `suv agent dashboard`). Claude Code and Cursor init also hint that the agent can query history directly via MCP.

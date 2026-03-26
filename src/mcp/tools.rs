@@ -26,6 +26,7 @@ pub fn list_tools(id: &Value) -> Value {
                 what_changed_def(),
                 what_failed_def(),
                 suggest_next_def(),
+                assess_risk_def(),
             ]
         }
     })
@@ -44,6 +45,7 @@ pub fn call_tool(repo: &Repository, name: &str, args: &Value) -> Result<String, 
         "what_changed" => handle_what_changed(repo, args),
         "what_failed" => handle_what_failed(repo, args),
         "suggest_next" => handle_suggest_next(repo, args),
+        "assess_risk" => handle_assess_risk(args),
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -199,6 +201,24 @@ fn suggest_next_def() -> Value {
             "properties": {
                 "directory": { "type": "string", "description": "Directory context (defaults to all)" },
                 "limit": { "type": "integer", "description": "Number of suggestions (default: 10)", "default": 10 }
+            }
+        }
+    })
+}
+
+fn assess_risk_def() -> Value {
+    json!({
+        "name": "assess_risk",
+        "description": "Assess the risk level of a command BEFORE running it. Returns safe/low/medium/high/critical with category and explanation. Use this to check if a command is destructive before executing it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": { "type": "string", "description": "The command to assess (e.g. 'rm -rf /tmp', 'git push --force')" },
+                "commands": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Multiple commands to assess at once"
+                }
             }
         }
     })
@@ -953,15 +973,96 @@ fn handle_suggest_next(repo: &Repository, args: &Value) -> Result<String, String
     Ok(out)
 }
 
+fn handle_assess_risk(args: &Value) -> Result<String, String> {
+    use crate::risk;
+
+    // Support single command or batch
+    let commands: Vec<&str> = if let Some(cmd) = get_str(args, "command") {
+        vec![cmd]
+    } else if let Some(arr) = args.get("commands").and_then(Value::as_array) {
+        arr.iter().filter_map(Value::as_str).collect()
+    } else {
+        return Err("Provide either 'command' (string) or 'commands' (array)".to_string());
+    };
+
+    if commands.is_empty() {
+        return Err("No commands provided".to_string());
+    }
+
+    let mut out = String::new();
+
+    if commands.len() == 1 {
+        let cmd = commands[0];
+        let assessment = risk::assess_risk(cmd);
+        let level = risk::risk_level(cmd);
+
+        let _ = writeln!(out, "Risk assessment for: {cmd}\n");
+        let _ = writeln!(out, "  Level: {}", level.label().to_uppercase());
+
+        if let Some(a) = assessment {
+            let _ = writeln!(out, "  Category: {}", a.category);
+            let _ = writeln!(out, "  Reason: {}", a.description);
+        } else {
+            let _ = writeln!(out, "  No known risk patterns detected.");
+        }
+    } else {
+        let _ = writeln!(out, "Risk assessment for {} commands:\n", commands.len());
+
+        let mut critical = 0usize;
+        let mut high = 0usize;
+        let mut medium = 0usize;
+
+        for cmd in &commands {
+            let level = risk::risk_level(cmd);
+            let assessment = risk::assess_risk(cmd);
+            let label = level.label().to_uppercase();
+
+            match level {
+                risk::RiskLevel::Critical => critical += 1,
+                risk::RiskLevel::High => high += 1,
+                risk::RiskLevel::Medium => medium += 1,
+                _ => {}
+            }
+
+            if level >= risk::RiskLevel::Medium {
+                let reason = assessment.as_ref().map_or("", |a| a.description);
+                let _ = writeln!(out, "  {label}: {cmd}");
+                if !reason.is_empty() {
+                    let _ = writeln!(out, "    → {reason}");
+                }
+            } else {
+                let _ = writeln!(out, "  {label}: {cmd}");
+            }
+        }
+
+        out.push('\n');
+        if critical > 0 || high > 0 {
+            let _ = writeln!(
+                out,
+                "⚠ WARNING: {critical} critical, {high} high-risk commands detected."
+            );
+        } else if medium > 0 {
+            let _ = writeln!(
+                out,
+                "⚡ {medium} medium-risk commands detected. Review before executing."
+            );
+        } else {
+            let _ = writeln!(out, "All commands appear safe.");
+        }
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_list_tools_has_all_ten() {
+    fn test_list_tools_count() {
         let resp = list_tools(&json!(1));
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 11);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"search_commands"));
@@ -974,6 +1075,7 @@ mod tests {
         assert!(names.contains(&"what_changed"));
         assert!(names.contains(&"what_failed"));
         assert!(names.contains(&"suggest_next"));
+        assert!(names.contains(&"assess_risk"));
     }
 
     #[test]
@@ -1385,5 +1487,71 @@ mod tests {
         assert_eq!(classify_command("ls -la"), None);
         assert_eq!(classify_command("cat file.txt"), None);
         assert_eq!(classify_command("grep TODO src/"), None);
+    }
+
+    // ── assess_risk tests ───────────────────────────────────
+
+    #[test]
+    fn test_assess_risk_critical_command() {
+        let result = handle_assess_risk(&json!({"command": "rm -rf /"}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(text.contains("CRITICAL"), "should be critical: {text}");
+    }
+
+    #[test]
+    fn test_assess_risk_safe_command() {
+        let result = handle_assess_risk(&json!({"command": "git status"}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("SAFE") || text.contains("No known risk"),
+            "should be safe: {text}"
+        );
+    }
+
+    #[test]
+    fn test_assess_risk_high_command() {
+        let result = handle_assess_risk(&json!({"command": "npm install some-package"}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("HIGH") || text.contains("MEDIUM"),
+            "package install should be high/medium risk: {text}"
+        );
+    }
+
+    #[test]
+    fn test_assess_risk_batch() {
+        let result = handle_assess_risk(&json!({
+            "commands": ["git status", "rm -rf /tmp", "ls"]
+        }));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("3 commands"),
+            "should assess 3 commands: {text}"
+        );
+        assert!(
+            text.contains("CRITICAL") || text.contains("HIGH"),
+            "should detect risky command: {text}"
+        );
+    }
+
+    #[test]
+    fn test_assess_risk_no_input() {
+        let result = handle_assess_risk(&json!({}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_assess_risk_force_push() {
+        let result = handle_assess_risk(&json!({"command": "git push --force origin main"}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("CRITICAL") || text.contains("HIGH"),
+            "force push should be high/critical: {text}"
+        );
     }
 }

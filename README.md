@@ -18,7 +18,7 @@
 - **<2ms** recording overhead, **<10ms** search across 1M+ entries
 - **AI agent tracking** — auto-detects Claude Code, Cursor, Antigravity, Codex, Aider
 - **Prompt Explorer** — trace every command back to the prompt that triggered it
-- **MCP Server** — AI agents query your history directly (`what_changed`, `what_failed`, `suggest_next`)
+- **MCP Server** — AI agents query your history directly (`what_changed`, `what_failed`, `assess_risk`)
 - **100% local** — no cloud, no telemetry, no account. MIT licensed.
 
 ```bash
@@ -145,7 +145,7 @@ Suvadu is designed for developers who want a powerful local-only shell history w
 - **Prompt Explorer** — browse agent prompts and drill into the commands they triggered (`suv agent prompts` or `p` in dashboard)
 - **Agent stats** — per-agent analytics with top commands, directories, and risk breakdown
 - **Agent report** — export activity as text, markdown, or JSON
-- **MCP Server** — AI agents query your shell history directly via `suv mcp-serve`. 10 tools including `what_changed`, `what_failed`, and `suggest_next` for agent-to-agent shared memory. 100% local.
+- **MCP Server** — AI agents query your shell history directly via `suv mcp-serve`. 11 tools including `what_changed`, `what_failed`, `suggest_next`, and `assess_risk` for pre-execution safety checks. 100% local.
 - **Claude Code integration** — `suv init claude-code` captures AI-executed commands and prompts via PostToolUse, PostToolUseFailure, and UserPromptSubmit hooks
 - **Cursor integration** — `suv init cursor` captures AI agent commands and prompts via afterShellExecution and beforeSubmitPrompt hooks
 - **Antigravity integration** — auto-detects agent commands via `$ANTIGRAVITY_AGENT` (prompts not available — no hooks system)
@@ -643,7 +643,7 @@ suv search --executor opencode      # OpenCode
 
 Suvadu includes an MCP server that lets AI agents query your shell history directly. It's auto-configured when you run `suv init claude-code` or `suv init cursor`.
 
-**10 tools available to agents:**
+**11 tools available to agents:**
 
 | Tool | Purpose |
 |------|---------|
@@ -657,6 +657,7 @@ Suvadu includes an MCP server that lets AI agents query your shell history direc
 | `what_changed` | What file-modifying operations happened recently |
 | `what_failed` | What failed and which prompt caused it |
 | `suggest_next` | Predict next commands based on frecency |
+| `assess_risk` | Check if a command is safe before running it |
 
 **Manual setup** (if not using `suv init`):
 
