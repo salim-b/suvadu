@@ -368,6 +368,108 @@ fn get_cached_prompt(session_id: &str) -> Option<String> {
     std::fs::read_to_string(prompt_file).ok()
 }
 
+/// Auto-configure the MCP server in Claude Code's `~/.claude.json`.
+/// Adds `suvadu` to the top-level `mcpServers` if not already present.
+fn try_configure_claude_mcp(bin_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let home = std::env::var("HOME")?;
+    let claude_json = PathBuf::from(&home).join(".claude.json");
+
+    let mut config: serde_json::Value = if claude_json.exists() {
+        let content = std::fs::read_to_string(&claude_json)?;
+        serde_json::from_str(&content)?
+    } else {
+        serde_json::json!({})
+    };
+
+    let obj = config
+        .as_object_mut()
+        .ok_or(".claude.json root is not an object")?;
+    let servers = obj
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    let servers_obj = servers
+        .as_object_mut()
+        .ok_or("mcpServers is not an object")?;
+
+    if servers_obj.contains_key("suvadu") {
+        return Ok(true); // already configured
+    }
+
+    servers_obj.insert(
+        "suvadu".to_string(),
+        serde_json::json!({
+            "type": "stdio",
+            "command": bin_path,
+            "args": ["mcp-serve"],
+            "env": {}
+        }),
+    );
+
+    let updated = serde_json::to_string_pretty(&config)?;
+    atomic_write(&claude_json, &updated)?;
+    Ok(true)
+}
+
+/// Auto-configure the MCP server in Cursor's `~/.cursor/mcp.json`.
+/// Adds `suvadu` to `mcpServers` if not already present.
+fn try_configure_cursor_mcp(bin_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let home = std::env::var("HOME")?;
+    let cursor_dir = PathBuf::from(&home).join(".cursor");
+    std::fs::create_dir_all(&cursor_dir)?;
+    let mcp_json = cursor_dir.join("mcp.json");
+
+    let mut config: serde_json::Value = if mcp_json.exists() {
+        let content = std::fs::read_to_string(&mcp_json)?;
+        serde_json::from_str(&content)?
+    } else {
+        serde_json::json!({})
+    };
+
+    let obj = config
+        .as_object_mut()
+        .ok_or("mcp.json root is not an object")?;
+    let servers = obj
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    let servers_obj = servers
+        .as_object_mut()
+        .ok_or("mcpServers is not an object")?;
+
+    if servers_obj.contains_key("suvadu") {
+        return Ok(true);
+    }
+
+    servers_obj.insert(
+        "suvadu".to_string(),
+        serde_json::json!({
+            "command": bin_path,
+            "args": ["mcp-serve"]
+        }),
+    );
+
+    let updated = serde_json::to_string_pretty(&config)?;
+    atomic_write(&mcp_json, &updated)?;
+    Ok(true)
+}
+
+/// Print post-install tips showing users what to try next.
+/// `has_prompts` indicates whether this integration captures prompts.
+fn print_post_install_tips(cyan: &str, r: &str, has_prompts: bool, has_mcp: bool) {
+    println!();
+    println!("After your next agent session, try:");
+    if has_prompts {
+        println!(
+            "  {cyan}suv agent prompts{r}     \u{2014} see what prompts triggered which commands"
+        );
+    }
+    println!("  {cyan}suv agent dashboard{r}   \u{2014} real-time agent activity monitor");
+    if has_mcp {
+        println!();
+        println!("Your AI agent can also query history directly \u{2014} try asking it:");
+        println!("  {cyan}\"What commands failed in this project recently?\"{r}");
+    }
+}
+
 /// Check if a hook command path belongs to suvadu. Uses path-separator-aware
 /// matching to avoid false positives on paths like `/usr/bin/not-suvadu-tool`.
 fn is_suvadu_hook_command(cmd: &str) -> bool {
@@ -453,6 +555,7 @@ pub fn handle_init_claude_code() -> Result<(), Box<dyn std::error::Error>> {
         ("", "")
     };
     let green = if color { "\x1b[32m" } else { "" };
+    let cyan = if color { "\x1b[36m" } else { "" };
     println!("{b}Suvadu — Claude Code Integration{r}");
     println!();
     println!("Hook scripts installed:");
@@ -483,8 +586,16 @@ pub fn handle_init_claude_code() -> Result<(), Box<dyn std::error::Error>> {
         println!("Then restart Claude Code to activate.");
     }
 
+    // Auto-configure MCP server
+    let mcp_configured = try_configure_claude_mcp(&bin_path);
+    if matches!(mcp_configured, Ok(true)) {
+        println!("{green}\u{2713}{r} MCP server auto-configured in ~/.claude.json");
+        println!("  AI agents can now query your shell history via MCP.");
+    }
+
     println!();
-    println!("Verify with: suv search --executor agent");
+    println!("Verify with: {cyan}suv search --executor agent{r}");
+    print_post_install_tips(cyan, r, true, true);
 
     Ok(())
 }
@@ -860,6 +971,7 @@ pub fn handle_init_opencode() -> Result<(), Box<dyn std::error::Error>> {
     println!("Commands executed by OpenCode will be recorded with executor=opencode.");
     println!();
     println!("Verify with: {cyan}suv search --executor opencode{r}");
+    print_post_install_tips(cyan, r, true, false);
 
     Ok(())
 }
@@ -946,8 +1058,16 @@ pub fn handle_init_cursor() -> Result<(), Box<dyn std::error::Error>> {
         println!("Then restart Cursor to activate.");
     }
 
+    // Auto-configure MCP server
+    let mcp_configured = try_configure_cursor_mcp(&bin_path);
+    if matches!(mcp_configured, Ok(true)) {
+        println!("{green}\u{2713}{r} MCP server auto-configured in ~/.cursor/mcp.json");
+        println!("  AI agents can now query your shell history via MCP.");
+    }
+
     println!();
     println!("Verify with: {cyan}suv search --executor cursor{r}");
+    print_post_install_tips(cyan, r, true, true);
 
     Ok(())
 }
@@ -1097,6 +1217,7 @@ pub fn handle_init_ide(
 
     println!();
     println!("Verify with: {cyan}suv search --executor {verify_executor}{r}");
+    print_post_install_tips(cyan, r, false, false);
 
     Ok(())
 }

@@ -3,7 +3,7 @@ use std::io;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation,
@@ -376,14 +376,21 @@ impl AgentApp {
                 format!("{}", i + 1),
                 Style::default().fg(t.text_muted),
             ));
-            spans.push(Span::styled(
-                format!(" {} ", p.label()),
-                if is_active {
-                    Style::default().fg(t.primary).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(t.text_secondary)
-                },
-            ));
+            if is_active {
+                spans.push(Span::styled(
+                    format!(" {} ", p.label()),
+                    Style::default()
+                        .bg(t.primary)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    format!(" {} ", p.label()),
+                    Style::default().fg(t.text_muted),
+                ));
+            }
+            spans.push(Span::raw(" "));
         }
 
         spans.push(Span::styled("  ", Style::default()));
@@ -674,8 +681,8 @@ impl AgentApp {
                 Row::new(vec![
                     Cell::from(time).style(Style::default().fg(t.text_muted)),
                     Cell::from(command_display),
-                    Cell::from(executor).style(Style::default().fg(t.warning)),
-                    Cell::from(path_display).style(Style::default().fg(t.text_secondary)),
+                    Cell::from(executor).style(Style::default().fg(t.badge_executor)),
+                    Cell::from(path_display).style(Style::default().fg(t.badge_path)),
                     Cell::from(exit_display).style(exit_style),
                     Cell::from(dur_str).style(Style::default().fg(t.text_muted)),
                 ])
@@ -904,7 +911,7 @@ impl AgentApp {
             Span::styled(" Prompts  ", badge_label),
             Span::styled(" ^Y ", badge_key),
             Span::styled(" Copy  ", badge_label),
-            Span::styled(" q ", badge_key),
+            Span::styled(" q/Esc ", badge_key),
             Span::styled(" Quit  ", badge_label),
         ];
 

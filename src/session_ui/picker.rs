@@ -396,7 +396,7 @@ impl PickerApp {
             footer_spans.push(Span::styled(" ^X ", badge_key));
             footer_spans.push(Span::styled(" Clear  ", badge_label));
         }
-        footer_spans.push(Span::styled(" Esc ", badge_key));
+        footer_spans.push(Span::styled(" q/Esc ", badge_key));
         footer_spans.push(Span::styled(" Quit  ", badge_label));
 
         f.render_widget(Paragraph::new(Line::from(footer_spans)), area);

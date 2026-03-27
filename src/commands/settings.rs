@@ -45,16 +45,49 @@ pub fn handle_status() -> Result<(), Box<dyn std::error::Error>> {
         println!("History is NOT being recorded.");
     }
 
-    // Session Info
-    if let Ok(session_id) = std::env::var("SUVADU_SESSION_ID") {
-        println!("\nSession Details:");
-        println!("  ID: {session_id}");
+    // Database info
+    if let Ok(db_path) = db::get_db_path() {
+        println!("\nDatabase:");
+        println!("  Path: {}", db_path.display());
 
-        // Try to fetch tag info
-        // We warn but don't fail if DB isn't accessible just for status
-        if let Ok(db_path) = db::get_db_path() {
-            if let Ok(conn) = db::init_db(&db_path) {
-                let repo = Repository::new(conn);
+        if let Ok(conn) = db::init_db(&db_path) {
+            let repo = Repository::new(conn);
+
+            // Total command count
+            let total = repo
+                .count_filtered(&crate::repository::QueryFilter {
+                    after: None,
+                    before: None,
+                    tag_id: None,
+                    exit_code: None,
+                    query: None,
+                    prefix_match: false,
+                    executor: None,
+                    cwd: None,
+                    field: crate::models::SearchField::Command,
+                })
+                .unwrap_or(0);
+            println!("  Commands: {total} recorded");
+
+            // Agent command count
+            let agent_entries = repo
+                .get_distinct_executors()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|e| e.starts_with("agent:") && !e.ends_with("unknown"))
+                .collect::<Vec<_>>();
+            if !agent_entries.is_empty() {
+                let agents: Vec<&str> = agent_entries
+                    .iter()
+                    .map(|e| e.strip_prefix("agent: ").unwrap_or(e.as_str()))
+                    .collect();
+                println!("  Agents:   {}", agents.join(", "));
+            }
+
+            // Session info
+            if let Ok(session_id) = std::env::var("SUVADU_SESSION_ID") {
+                println!("\nSession:");
+                println!("  ID: {session_id}");
                 if let Ok(Some(session)) = repo.get_session(&session_id) {
                     let tag_display = session.tag_id.map_or_else(
                         || "None".to_string(),
@@ -70,9 +103,22 @@ pub fn handle_status() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Tag: {tag_display}");
                 }
             }
+
+            // Tips
+            let color = crate::util::color_enabled();
+            let cyan = if color { "\x1b[36m" } else { "" };
+            let r = if color { "\x1b[0m" } else { "" };
+            println!();
+            println!("Try:");
+            println!(
+                "  {cyan}suv search{r}            \u{2014} interactive history search (or Ctrl+R)"
+            );
+            if !agent_entries.is_empty() {
+                println!("  {cyan}suv agent dashboard{r}  \u{2014} monitor agent activity");
+            }
         }
     } else {
-        println!("\nSession Details: No SUVADU_SESSION_ID found in environment.");
+        println!("\nDatabase: not found. Run a few commands first.");
     }
 
     Ok(())

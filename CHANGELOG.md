@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-03-25
+
+### Added
+- **MCP Server** — `suv mcp-serve` exposes shell history to AI agents via the Model Context Protocol. 11 tools including `assess_risk` for pre-execution safety checks. 5 browsable resources (`history/recent`, `failures/recent`, `stats/today`, `risk/summary`, `agents/activity`) plus a `session/{id}` template — agents get history context automatically without calling tools. 100% local, read-only, no network.
+- **MCP auto-configuration** — `suv init claude-code` and `suv init cursor` now automatically register the MCP server in `~/.claude.json` and `~/.cursor/mcp.json`. Zero extra setup for agent memory.
+- **Cursor agent integration** — `suv init cursor` installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Captures AI agent commands with exit codes and prompts.
+- **Post-install tips** — all `suv init` commands now show actionable next steps (`suv agent prompts`, `suv agent dashboard`). Claude Code and Cursor init also hint that the agent can query history directly via MCP.
+- **Enhanced `suv status`** — shows database path, total commands recorded, detected agents, and actionable tips.
+
+### Fixed
+- **Cursor executor detection** — Cursor agent commands (via `$CURSOR_AGENT`) detected as `executor_type="agent"`. Cursor and Antigravity checks moved before VS Code to avoid misidentification (both are VS Code forks).
+- **Antigravity tagged as agent** — changed from `executor_type="ide"` to `executor_type="agent"` since `$ANTIGRAVITY_AGENT` signals AI agent execution.
+- **Unique mode sort** — `Ctrl+U` in search now sorts by frequency (most used first) instead of recency, so common commands like `git status` appear at the top instead of one-off agent commands.
+- **Relative date parsing** — `"N days ago"` now works in all date inputs, fixing `suv agent prompts` default `--after "7 days ago"` which was silently returning no filter.
+- **Settings list scrolling** — exclusions, auto-tags, and agents lists now show scrollbars when items overflow.
+
+### Changed
+- **Unified TUI styling** — period selector uses pill-style highlight (bg) and left-aligned key numbers across Stats, Agent Dashboard, and Agent Stats. Executor color standardized to `badge_executor`, path to `badge_path`, session ID to `primary_dim` across all TUIs. All top-level TUIs show `q/Esc Quit` consistently.
+- **Agent Stats title** — renamed from "AGENT ANALYTICS" to "AGENT STATS" to match the command name.
+- **Full session ID** — search and dashboard detail panes show full session ID instead of truncated 8 chars.
+- **Prompt shown in search** — agent prompt displayed in search detail pane when available.
+
 ## [0.1.5] - 2026-03-23
 
 ### Added

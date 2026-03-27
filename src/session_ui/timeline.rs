@@ -594,7 +594,7 @@ impl SessionApp {
             Span::styled(" First/Last  ", badge_label),
             Span::styled(" ^Y ", badge_key),
             Span::styled(" Copy  ", badge_label),
-            Span::styled(" q ", badge_key),
+            Span::styled(" q/Esc ", badge_key),
             Span::styled(" Quit  ", badge_label),
         ];
 
@@ -683,7 +683,7 @@ fn render_entry_row(
     let dir_style = if dir_changed {
         Style::default().fg(t.info).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(t.text_secondary)
+        Style::default().fg(t.badge_path)
     };
     let dir_display = crate::util::truncate_str_start(&dir_full, 20, "..");
 

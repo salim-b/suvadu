@@ -15,7 +15,7 @@ mod tests;
 
 use crate::db::DbResult;
 use crate::models::{Entry, Session};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 
 /// Shared entry column list for SELECT queries
 pub const ENTRY_COLUMNS: &str = "e.id, e.session_id, e.command, e.cwd, e.exit_code, e.started_at, e.ended_at, e.duration_ms, e.context, COALESCE(et.name, st.name) as tag_name, e.tag_id, e.executor_type, e.executor";
@@ -492,6 +492,16 @@ impl Repository {
     pub fn init() -> crate::db::DbResult<Self> {
         let db_path = crate::db::get_db_path()?;
         let conn = crate::db::init_db(&db_path)?;
+        Ok(Self::new(conn))
+    }
+
+    /// Open the database in **read-only** mode. No migrations are run.
+    /// Used by the MCP server to prevent accidental writes.
+    pub fn init_read_only() -> crate::db::DbResult<Self> {
+        let db_path = crate::db::get_db_path()?;
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(&db_path, flags)?;
+        conn.busy_timeout(std::time::Duration::from_millis(5000))?;
         Ok(Self::new(conn))
     }
 

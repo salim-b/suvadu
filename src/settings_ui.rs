@@ -6,7 +6,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
+    },
     Terminal,
 };
 use std::io;
@@ -618,7 +621,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut AppState) {
 
     let mut help_badges = match app.input_mode {
         InputMode::Normal => vec![
-            Span::styled(" q ", badge_key),
+            Span::styled(" q/Esc ", badge_key),
             Span::styled(" Quit  ", badge_label),
             Span::styled(" s ", badge_key),
             Span::styled(" Save  ", badge_label),
@@ -875,6 +878,26 @@ fn render_shell_tab(f: &mut ratatui::Frame, app: &AppState, area: Rect) {
     f.render_widget(list, area);
 }
 
+/// Render a scrollbar next to a list widget.
+fn render_list_scrollbar(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    item_count: usize,
+    selected: usize,
+    t: &crate::theme::Theme,
+) {
+    if item_count > 0 {
+        let mut scrollbar_state = ScrollbarState::new(item_count).position(selected);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::default().fg(t.primary_dim))
+                .track_style(Style::default().fg(t.border)),
+            area,
+            &mut scrollbar_state,
+        );
+    }
+}
+
 fn render_exclusions_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) {
     let t = theme();
 
@@ -920,7 +943,9 @@ fn render_exclusions_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect)
             app.exclusion_list_state.select(Some(0));
         }
 
+        let item_count = app.config.exclusions.len();
         f.render_stateful_widget(list, area, &mut app.exclusion_list_state);
+        render_list_scrollbar(f, area, item_count, app.selected_item, t);
     }
 }
 
@@ -970,7 +995,9 @@ fn render_auto_tags_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) 
             app.auto_tag_list_state.select(Some(0));
         }
 
+        let item_count = app.config.auto_tags.len();
         f.render_stateful_widget(list, area, &mut app.auto_tag_list_state);
+        render_list_scrollbar(f, area, item_count, app.selected_item, t);
     }
 }
 
@@ -1105,7 +1132,9 @@ fn render_agents_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) {
             app.agent_list_state.select(Some(0));
         }
 
+        let item_count = app.config.agents.len();
         f.render_stateful_widget(list, area, &mut app.agent_list_state);
+        render_list_scrollbar(f, area, item_count, app.selected_item, t);
     }
 }
 

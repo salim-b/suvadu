@@ -332,8 +332,8 @@ fn render_suggest_footer(
             Span::styled(" All/None  ", Style::default().fg(t.text_muted)),
             Span::styled("Enter", Style::default().fg(t.success)),
             Span::styled(" Confirm  ", Style::default().fg(t.text_muted)),
-            Span::styled("q", Style::default().fg(t.error)),
-            Span::styled(" Quit", Style::default().fg(t.text_muted)),
+            Span::styled(" q/Esc ", Style::default().bg(t.badge_bg).fg(t.text)),
+            Span::styled(" Quit", Style::default().fg(t.text_secondary)),
         ]
     };
 

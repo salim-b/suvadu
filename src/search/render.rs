@@ -1927,10 +1927,10 @@ mod tests {
     fn test_entry_row_styles_selected_local() {
         let t = crate::theme::theme();
         let styles = entry_row_styles(t, true, true);
-        // When selected + local, path should be primary color with bold
+        // When selected + local, path should be badge_path color with bold
         let expected_path = Style::default()
             .bg(t.selection_bg)
-            .fg(t.primary)
+            .fg(t.badge_path)
             .add_modifier(Modifier::BOLD);
         assert_eq!(styles.path, expected_path);
     }
@@ -1948,8 +1948,8 @@ mod tests {
     fn test_entry_row_styles_not_selected_local() {
         let t = crate::theme::theme();
         let styles = entry_row_styles(t, false, true);
-        // When not selected + local, path should be primary color (no bold)
-        let expected_path = Style::default().fg(t.primary);
+        // When not selected + local, path should be badge_path color
+        let expected_path = Style::default().fg(t.badge_path);
         assert_eq!(styles.path, expected_path);
         // bg should be default (no background)
         assert_eq!(styles.bg, Style::default());

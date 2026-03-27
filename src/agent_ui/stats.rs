@@ -4,7 +4,7 @@ use std::io;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Terminal;
@@ -260,38 +260,7 @@ impl AgentStatsApp {
             ])
             .split(size);
 
-        // Header
-        let mut header_spans = vec![
-            Span::styled(
-                " AGENT ANALYTICS ",
-                Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  ", Style::default()),
-        ];
-        for (i, p) in [
-            Period::Today,
-            Period::Days7,
-            Period::Days30,
-            Period::AllTime,
-        ]
-        .iter()
-        .enumerate()
-        {
-            let active = *p == self.period;
-            header_spans.push(Span::styled(
-                format!("{}", i + 1),
-                Style::default().fg(t.text_muted),
-            ));
-            header_spans.push(Span::styled(
-                format!(" {} ", p.label()),
-                if active {
-                    Style::default().fg(t.primary).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(t.text_secondary)
-                },
-            ));
-        }
-        f.render_widget(Paragraph::new(Line::from(header_spans)), chunks[0]);
+        self.render_header(f, chunks[0], t);
 
         // Agent cards
         if self.agents.is_empty() {
@@ -344,7 +313,7 @@ impl AgentStatsApp {
             Span::styled(" Navigate  ", badge_label),
             Span::styled(" ^Y ", badge_key),
             Span::styled(" Copy  ", badge_label),
-            Span::styled(" q ", badge_key),
+            Span::styled(" q/Esc ", badge_key),
             Span::styled(" Quit ", badge_label),
         ];
 
@@ -358,6 +327,47 @@ impl AgentStatsApp {
         }
 
         f.render_widget(Paragraph::new(Line::from(footer)), chunks[3]);
+    }
+
+    fn render_header(&self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {
+        let mut spans = vec![
+            Span::styled(
+                " AGENT STATS ",
+                Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+        ];
+        for (i, p) in [
+            Period::Today,
+            Period::Days7,
+            Period::Days30,
+            Period::AllTime,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let active = *p == self.period;
+            spans.push(Span::styled(
+                format!("{}", i + 1),
+                Style::default().fg(t.text_muted),
+            ));
+            if active {
+                spans.push(Span::styled(
+                    format!(" {} ", p.label()),
+                    Style::default()
+                        .bg(t.primary)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    format!(" {} ", p.label()),
+                    Style::default().fg(t.text_muted),
+                ));
+            }
+            spans.push(Span::raw(" "));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn render_agent_cards(&self, f: &mut ratatui::Frame, area: Rect, t: &crate::theme::Theme) {

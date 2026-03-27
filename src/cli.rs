@@ -112,6 +112,10 @@ pub enum Commands {
     #[command(name = "hook-cursor", hide = true)]
     HookCursor,
 
+    /// Start the MCP server (reads JSON-RPC from stdin, writes to stdout)
+    #[command(name = "mcp-serve", hide = true)]
+    McpServe,
+
     /// Process a Cursor `beforeSubmitPrompt` hook event (reads JSON from stdin)
     #[command(name = "hook-cursor-prompt", hide = true)]
     HookCursorPrompt,

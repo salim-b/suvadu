@@ -357,7 +357,11 @@ impl StatsApp {
             Period::AllTime,
         ];
         let mut period_spans: Vec<Span> = Vec::new();
-        for p in &periods {
+        for (i, p) in periods.iter().enumerate() {
+            period_spans.push(Span::styled(
+                format!("{}", i + 1),
+                Style::default().fg(t.text_muted),
+            ));
             if *p == self.period {
                 period_spans.push(Span::styled(
                     format!(" {} ", p.label()),
@@ -375,14 +379,8 @@ impl StatsApp {
             period_spans.push(Span::raw(" "));
         }
 
-        let title_width: usize = title_spans.iter().map(Span::width).sum();
-        let period_width: usize = period_spans.iter().map(Span::width).sum();
-        let padding = area
-            .width
-            .saturating_sub(title_width as u16 + period_width as u16);
-
         let mut spans = title_spans;
-        spans.push(Span::raw(" ".repeat(padding as usize)));
+        spans.push(Span::styled("  ", Style::default()));
         spans.extend(period_spans);
 
         f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -884,7 +882,7 @@ impl StatsApp {
         let badge_label = Style::default().fg(t.text_secondary);
 
         let spans = vec![
-            Span::styled(" Esc ", badge_key),
+            Span::styled(" q/Esc ", badge_key),
             Span::styled(" Quit  ", badge_label),
             Span::styled(" 1 ", badge_key),
             Span::styled(" 7d  ", badge_label),
