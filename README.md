@@ -27,7 +27,7 @@ echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
 suv status   # verify it's working
 ```
 
-> **Website:** [appachi.tech/suvadu](https://www.appachi.tech/suvadu) · **GitHub:** [AppachiTech/suvadu](https://github.com/AppachiTech/suvadu)
+> **Website:** [suvadu.sh](https://suvadu.sh) · **GitHub:** [AppachiTech/suvadu](https://github.com/AppachiTech/suvadu)
 
 ---
 
