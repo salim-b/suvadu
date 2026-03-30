@@ -16,18 +16,83 @@
 **Suvadu** replaces your shell history with a SQLite-backed store. Every command gets structured context — exit code, duration, directory, executor, session. AI agents can query it via MCP. 100% local.
 
 - **<2ms** recording overhead, **<10ms** search across 1M+ entries
-- **AI agent tracking** — auto-detects Claude Code, Cursor, Antigravity, Codex, Aider
+- **AI agent tracking** — auto-detects Claude Code, Cursor, OpenCode, Antigravity, Codex, Aider
 - **Prompt Explorer** — trace every command back to the prompt that triggered it
-- **MCP Server** — AI agents get history context automatically + 11 tools including `assess_risk` for safety checks
+- **MCP Server** — 11 tools including `assess_risk` for pre-execution safety checks
 - **100% local** — no cloud, no telemetry, no account. MIT licensed.
 
+> **Website & Docs:** [suvadu.sh](https://suvadu.sh) &middot; **CLI Reference:** [suvadu.sh/cli](https://suvadu.sh/cli/) &middot; **Blog:** [suvadu.sh/blog](https://suvadu.sh/blog/)
+
+---
+
+## Install
+
 ```bash
+# Homebrew (macOS)
 brew tap AppachiTech/suvadu && brew install suvadu
-echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
-suv status   # verify it's working
+
+# Install script (macOS & Linux)
+curl -fsSL https://downloads.appachi.tech/suvadu/install.sh | sh
+
+# Cargo
+cargo install suvadu
 ```
 
-> **Website:** [suvadu.sh](https://suvadu.sh) · **GitHub:** [AppachiTech/suvadu](https://github.com/AppachiTech/suvadu)
+Then add shell hooks:
+
+```bash
+# Zsh
+echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
+
+# Bash
+echo 'eval "$(suv init bash)"' >> ~/.bashrc && source ~/.bashrc
+```
+
+Verify: `suv status`
+
+---
+
+## Quick Start
+
+```bash
+suv search                  # Interactive search TUI (also Ctrl+R)
+suv stats                   # Stats dashboard with heatmap
+suv replay --after today    # Timeline of today's commands
+suv agent dashboard         # Monitor AI agent activity
+suv agent prompts           # Browse prompts and their commands
+```
+
+---
+
+## AI Agent Setup
+
+```bash
+suv init claude-code    # Claude Code — hooks + MCP + prompt capture
+suv init cursor         # Cursor — hooks + MCP + prompt capture
+suv init opencode       # OpenCode — plugin + prompt capture
+suv init antigravity    # Antigravity — auto-detect
+```
+
+Then ask your agent: *"What commands failed in this project recently?"*
+
+See the [full integration guide](https://suvadu.sh/blog/track-ai-agent-commands-with-suvadu/) and [MCP server docs](https://suvadu.sh/cli/mcp-server/).
+
+---
+
+## Key Features
+
+| Feature | Details |
+|---------|---------|
+| **Search** | Fuzzy search TUI with filters, Smart mode, detail pane, bookmarks |
+| **Agent Dashboard** | Timeline, risk assessment, per-agent analytics, exportable reports |
+| **MCP Server** | 11 tools + 5 resources — AI agents query your history directly |
+| **Prompt Explorer** | Trace commands back to the prompt that triggered them |
+| **Stats** | Heatmap, hourly distribution, top commands, executor breakdown |
+| **Organization** | Tags, bookmarks, notes, alias suggestions |
+| **Privacy** | Space-prefix exclusion, regex patterns, secret redaction, local-only |
+| **Arrow Keys** | Frecency-ranked Up/Down that prefers same-directory commands |
+
+Full feature documentation at [suvadu.sh/cli](https://suvadu.sh/cli/).
 
 ---
 
@@ -50,790 +115,22 @@ suv status   # verify it's working
 
 ---
 
-## Table of Contents
-
-- [Why Suvadu?](#why-suvadu)
-  - [How does Suvadu compare to other tools?](#how-does-suvadu-compare-to-other-tools)
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-  - [Interactive Search](#interactive-search-tui)
-  - [Session Replay](#session-replay)
-  - [Stats Dashboard](#stats-dashboard)
-  - [Agent Monitoring](#agent-monitoring)
-  - [Alias Suggestions](#alias-suggestions)
-  - [Executor Tracking](#executor-tracking)
-  - [Managing Recording](#managing-recording)
-  - [Tags, Bookmarks & Notes](#tags-bookmarks--notes)
-  - [Bulk Deletion](#bulk-deletion)
-  - [Export & Import](#export--import)
-  - [Privacy](#privacy)
-- [Configuration](#configuration)
-- [IDE & AI Agent Integrations](#ide--ai-agent-integrations)
-- [How It Works](#how-it-works)
-- [Command Reference](#command-reference)
-- [Development](#development)
-- [Contributing](#contributing)
-- [Security](#security)
-- [License](#license)
-
----
-
-## Why Suvadu?
-
-Your shell history is one of your most valuable productivity assets — but the default implementation is stuck in the 1970s. A flat text file with no structure, no search, no context, and no way to track what your AI agents are doing.
-
-**Suvadu fixes this.** Every command gets a structured record with working directory, exit code, duration, executor identity, and session context. Search is fast. AI agent commands are tracked and risk-assessed automatically.
-
-| | Default Shell History | Suvadu |
-|---|---|---|
-| **Storage** | Flat text file | SQLite + WAL |
-| **Search** | Linear scan, regex only | Fuzzy search, indexed |
-| **Context** | None | Directory, exit code, duration, executor, tags |
-| **AI Agents** | Invisible | Auto-detected, risk-assessed, auditable |
-| **Cross-shell** | Per-shell files | Unified database |
-| **UI** | Reverse-i-search | Interactive TUI with filters, preview, bookmarks |
-
-### How does Suvadu compare to other tools?
-
-| Feature | Suvadu | Atuin | McFly | Hstr | fzf history |
-|---------|--------|-------|-------|------|-------------|
-| **Storage** | Local SQLite | Cloud or local SQLite | Local SQLite | In-memory | Flat file |
-| **Cloud sync** | No — privacy-first, local-only | Yes (optional local) | No | No | No |
-| **TUI** | Full-screen with detail pane | Full-screen | Inline overlay | Full-screen | Inline |
-| **Fuzzy search** | Yes (nucleo) | Yes (skim) | Neural scoring | Substring/regex | Yes (fzf) |
-| **Activity heatmap** | Yes (5-tier) | Dashboard (cloud) | No | No | No |
-| **AI agent tracking** | Auto-detect + risk assess | No | No | No | No |
-| **Secrets redaction** | Auto before storage | No | No | No | No |
-| **Session timeline** | Interactive TUI | No | No | No | No |
-| **Themes** | 3 built-in, hot-swap | No | No | No | No |
-| **Signed updates** | Minisign verification | Yes | No | No | No |
-| **Account required** | No | Yes (for sync) | No | No | No |
-
-Suvadu is designed for developers who want a powerful local-only shell history with no cloud dependency, no account, and no data leaving their machine.
-
----
-
-## Features
-
-### High Performance
-- **SQLite with WAL mode** — low-latency writes, even with millions of records
-- **Indexed search** — fast results across your entire history
-- **Fuzzy matching** — powered by nucleo-matcher (same engine as Helix editor)
-
-### Interactive Search
-- **Full TUI** — structured table with time, session/tag, executor, path, command, status, and duration columns
-- **Syntax highlighting** — commands, flags, strings, variables, paths, and operators each get distinct colors
-- **Smart mode** — context-aware ranking boosts same-directory results (`Ctrl+S`)
-- **Directory scoping** — filter to current working directory (`Ctrl+L` or `--here`)
-- **Date filters** — `Ctrl+F` panel with "today", "yesterday", "N days ago", or `YYYY-MM-DD` ranges
-- **Detail pane** — `Tab` to preview full entry metadata
-- **Deduplication** — toggle unique command view with `Ctrl+U`
-- **Help overlay** — press `F1` or `?` to see all keyboard shortcuts organized by category
-- **Responsive layout** — column layout adapts to narrow, medium, and wide terminals
-- **Field-specific search** — target a single field with `--field cwd`, `--field session`, or `--field executor`
-
-### Smart Arrow Keys
-- **Frecency ranking** — Up/Down arrow prefers same-directory commands using frequency × recency scoring
-- Configurable via `suv settings` → Shell → Enable Arrow Key Navigation
-
-### AI Agent Monitoring
-- **Auto-detection** — identifies commands from Claude Code, Cursor, Antigravity, Codex, Aider, VS Code, and more
-- **Risk assessment** — every agent command classified as Critical, High, Medium, Low, or Safe
-- **Agent dashboard** — real-time TUI with timeline, risk indicators, and detail pane
-- **Prompt Explorer** — browse agent prompts and drill into the commands they triggered (`suv agent prompts` or `p` in dashboard)
-- **Agent stats** — per-agent analytics with top commands, directories, and risk breakdown
-- **Agent report** — export activity as text, markdown, or JSON
-- **MCP Server** — AI agents query your shell history directly via `suv mcp-serve`. 11 tools including `what_changed`, `what_failed`, `suggest_next`, and `assess_risk` for pre-execution safety checks. 100% local.
-- **Claude Code integration** — `suv init claude-code` captures AI-executed commands and prompts via PostToolUse, PostToolUseFailure, and UserPromptSubmit hooks
-- **Cursor integration** — `suv init cursor` captures AI agent commands and prompts via afterShellExecution and beforeSubmitPrompt hooks
-- **Antigravity integration** — auto-detects agent commands via `$ANTIGRAVITY_AGENT` (prompts not available — no hooks system)
-- **OpenCode integration** — `suv init opencode` installs a plugin for automatic command capture
-- **Custom agent config** — define detection rules for any agent via `suv settings` → Agents tab
-
-### Tagging, Bookmarks & Notes
-- **Session tags** — categorize sessions (e.g., "work", "personal") for filtering
-- **Auto-tagging** — automatically assign tags based on working directory
-- **Bookmarks** — star favorite commands (`Ctrl+B` in TUI) with optional labels
-- **Notes** — annotate any entry with context (`Ctrl+N` in TUI)
-
-### Privacy First
-- Commands prefixed with a **space** are not recorded
-- Configurable **regex exclusion patterns**
-- Per-session **pause** (`suv pause`) and global **disable** (`suv disable`)
-- **Bulk delete** matching entries by pattern or date range
-- **All data stays local** — no telemetry, no external servers
-
-### Security
-- **Secrets redaction** — auto-detects and redacts API keys, tokens, and passwords before storage
-- **Update verification** — Minisign signature verification on self-update binaries
-- **File permissions** — database and config files use owner-only permissions (`0o600`)
-- **ReDoS protection** — user-supplied regex patterns are validated against catastrophic backtracking
-- **SQL safety** — identifier allowlisting prevents SQL injection
-- **CSV injection prevention** — exported values are sanitized against formula injection
-- **Bounded inputs** — search queries (2,000 chars), settings values (500), session IDs (256)
-
-### Themes
-- **Three-tier theme system** — `dark`, `light`, and `terminal` (ANSI 16-color)
-- **Hot-swap** — switch themes live in the settings TUI
-
-### Alias Management
-- **Full lifecycle** — `suv alias add`, `remove`, `list`, and `apply`
-- **Smart suggestions** — `suv alias add-suggested` opens an interactive picker based on history analysis
-
-### Session Timeline
-- **`suv session`** — interactive TUI with session picker, live search, date/tag filters, command-level detail, scroll, and navigation
-
-### Garbage Collection
-- **`suv gc`** — remove orphaned tags and sessions, then compact the database with VACUUM
-
-### More
-- **Shell integration** — Zsh (5.1+) and Bash, with `Ctrl+R` search and arrow key cycling
-- **Session replay** — chronological timeline with date, directory, tag, and executor filters
-- **Stats dashboard** — interactive TUI with heatmap, sparkline, hourly distribution, and top commands
-- **Alias suggestions** — analyzes history to suggest shell aliases for frequently-typed commands
-- **Export & import** — JSONL, CSV, JSON, and `~/.zsh_history` import
-- **JSON output** — `--format json` for export; `--json` flag for machine-readable output
-- **Tag filtering** — `suv stats --tag work` narrows analytics to a specific tag
-- **Transaction safety** — import errors trigger automatic rollback, no partial writes
-- **Frequency-weighted suggestions** — suggest engine weighs command frequency for smarter alias picks
-- **Shell completions** — Zsh, Bash, and Fish (`suv completions <shell>`)
-- **Self-update** — `suv update` with Minisign signature verification
-
----
-
-## Installation
-
-### Prerequisites
-
-- **macOS** (Apple Silicon or Intel) or **Linux** (x86_64 or ARM64)
-- **Zsh 5.1+** or **Bash**
-
-### Homebrew (macOS — Recommended)
-
-```bash
-brew tap AppachiTech/suvadu
-brew install suvadu
-
-# Add to your shell (choose one):
-echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
-# or
-echo 'eval "$(suv init bash)"' >> ~/.bashrc && source ~/.bashrc
-```
-
-### Manual Install — macOS
-
-```bash
-curl -fsSL https://downloads.appachi.tech/macos/suv-macos-latest.tar.gz \
-  | tar -xz \
-  && sudo mv suv /usr/local/bin/ \
-  && sudo ln -sf /usr/local/bin/suv /usr/local/bin/suvadu
-
-echo 'eval "$(suv init zsh)"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-### Manual Install — Linux
-
-```bash
-# Auto-detects architecture (x86_64 or aarch64/Graviton)
-ARCH=$(uname -m)
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-  URL="https://downloads.appachi.tech/linux/suv-linux-aarch64-latest.tar.gz"
-else
-  URL="https://downloads.appachi.tech/linux/suv-linux-latest.tar.gz"
-fi
-
-curl -fsSL "$URL" \
-  | tar -xz \
-  && sudo mv suv /usr/local/bin/ \
-  && sudo ln -sf /usr/local/bin/suv /usr/local/bin/suvadu
-
-# Add to your shell (choose one):
-echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
-# or
-echo 'eval "$(suv init bash)"' >> ~/.bashrc && source ~/.bashrc
-```
-
-### Cargo (any platform with Rust)
-
-```bash
-cargo install suvadu
-
-# Add to your shell (choose one):
-echo 'eval "$(suv init zsh)"' >> ~/.zshrc && source ~/.zshrc
-# or
-echo 'eval "$(suv init bash)"' >> ~/.bashrc && source ~/.bashrc
-```
-
-### Build from Source
-
-```bash
-git clone https://github.com/AppachiTech/suvadu.git
-cd suvadu
-cargo build --release
-sudo cp target/release/suv /usr/local/bin/
-```
-
-### Updating
-
-```bash
-# Homebrew
-brew update && brew tap AppachiTech/suvadu && brew upgrade suvadu
-
-# Cargo
-cargo install suvadu
-
-# Manual installations (curl/tar)
-suv update
-
-# Or use the install script (also works for first-time installs)
-curl -fsSL https://downloads.appachi.tech/install.sh | bash
-```
-
-### Uninstalling
-
-```bash
-suv uninstall
-```
-
----
-
-## Quick Start
-
-```bash
-# Verify installation
-suv --help
-
-# Check recording status
-suv status
-
-# Open interactive search (or press Ctrl+R)
-suv search
-
-# Open settings
-suv settings
-```
-
----
-
-## Usage
-
-### Interactive Search (TUI)
-
-`Ctrl+R` is automatically bound to Suvadu's search when shell hooks are active.
-
-```bash
-suv search                        # Open search
-suv search --query "git commit"   # Search with initial query
-suv search --unique               # Unique commands only
-suv search --here                 # Commands from current directory
-suv search --executor agent       # Filter by executor type
-suv search --field cwd            # Search by directory
-suv search --field session        # Search by session
-suv search --field executor       # Search by executor
-```
-
-#### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| Type | Fuzzy search across history |
-| `Up` / `Down` | Navigate results |
-| `Tab` | Toggle detail preview pane |
-| `Enter` | Select and execute command |
-| `Esc` | Exit without selecting |
-| `Ctrl+S` | Toggle Smart mode (context-aware ranking) |
-| `Ctrl+L` | Toggle directory-scoped filter |
-| `Ctrl+U` | Toggle unique/deduplicated view |
-| `Ctrl+F` | Open filter panel (date, tag, exit code, executor) |
-| `Ctrl+B` | Toggle bookmark on selected entry |
-| `Ctrl+N` | Add or edit note on selected entry |
-| `Ctrl+T` | Associate current session with a tag |
-| `Ctrl+Y` | Copy selected command to clipboard |
-| `Ctrl+D` | Delete selected entry (with confirmation) |
-| `Ctrl+G` | Go to specific page |
-| `Left` / `Right` | Previous / next page |
-| `F1` / `?` | Show help overlay |
-
-> **Smart Fallback:** If Suvadu is disabled or paused, `Ctrl+R` automatically reverts to your shell's default history search.
-
-### Session Replay
-
-```bash
-suv replay                              # Current session
-suv replay --after today                # Today's commands
-suv replay --after yesterday --here     # Yesterday, this directory
-suv replay --session <id>               # Specific session
-```
-
-### Stats Dashboard
-
-```bash
-suv stats                # Interactive TUI dashboard
-suv stats --days 30      # Last 30 days
-suv stats --text         # Plain text output
-suv stats --tag work     # Stats filtered by tag
-```
-
-### Agent Monitoring
-
-Monitor and audit every command your AI agents run.
-
-```bash
-# Interactive dashboard with timeline and risk indicators
-suv agent dashboard
-suv agent dashboard --executor claude-code
-suv agent dashboard --after yesterday --here
-
-# Browse prompts and the commands they triggered
-suv agent prompts
-suv agent prompts --executor claude-code
-suv agent prompts --after yesterday
-
-# Per-agent analytics — breakdown cards, top commands, risk table
-suv agent stats
-suv agent stats --days 7
-
-# Export agent activity report
-suv agent report
-suv agent report --format markdown > report.md
-suv agent report --format json | jq .
-```
-
-#### Dashboard Controls
-
-| Key | Action |
-|-----|--------|
-| `Up` / `Down` | Navigate timeline |
-| `Tab` | Toggle detail pane |
-| `1` / `2` / `3` / `4` | Period: Today / 7d / 30d / All |
-| `a` | Cycle agent filter |
-| `r` | Toggle risk-only filter (medium+ risk) |
-| `p` | Open Prompt Explorer |
-| `Ctrl+Y` | Copy selected command to clipboard |
-| `q` / `Esc` | Quit |
-
-#### Risk Levels
-
-Every agent command is automatically classified:
-
-| Level | Examples | Indicator |
-|-------|----------|-----------|
-| **Critical** | `rm -rf /`, `DROP TABLE`, `git push --force origin main` | `!!` |
-| **High** | `chmod 777`, `npm install`, `pip install`, config overwrites | `!!` |
-| **Medium** | `git reset`, `docker run`, environment modifications | `~` |
-| **Low** | File writes, branch operations | `.` |
-| **Safe** | `git status`, `ls`, `cargo test`, `grep` | `ok` |
-
-### Alias Suggestions
-
-```bash
-suv suggest-aliases                    # Interactive TUI
-suv suggest-aliases --text             # Plain text output
-suv suggest-aliases --days 30 -c 5     # Last 30 days, min 5 uses
-```
-
-### Executor Tracking
-
-Suvadu automatically detects and records **who or what** executed each command:
-
-| Type | Executors | Detection |
-|------|-----------|-----------|
-| **Human** | Terminal | Interactive TTY check |
-| **AI Agent** | Claude Code, Cursor, Antigravity, Codex, Aider, Continue, Copilot | Hooks + environment variables |
-| **IDE** | VS Code, Cursor, Windsurf, IntelliJ, PyCharm | Environment variables |
-| **CI/CD** | GitHub Actions, GitLab CI, CircleCI | Environment variables |
-| **Programmatic** | Subprocess | Non-interactive shell fallback |
-
-Filter by executor in the search TUI (`Ctrl+F` → Executor) or via CLI:
-
-```bash
-suv search --executor agent
-suv search --executor cursor
-```
-
-#### `suv wrap` — Agent & Script Integration
-
-For agents and scripts that don't load shell hooks:
-
-```bash
-suv wrap -- git status
-suv wrap --executor-type agent --executor claude-code -- npm test
-suv wrap --executor-type ci --executor github-actions -- make deploy
-```
-
-### Managing Recording
-
-```bash
-suv disable              # Stop recording globally
-suv enable               # Resume recording
-eval $(suv pause)        # Pause current session only
-suv status               # Check recording state
-```
-
-### Tags, Bookmarks & Notes
-
-```bash
-# Tags
-suv tag create "work" --description "Work related"
-suv tag list
-suv tag update "work" --new-name "office" --description "Office stuff"
-suv tag associate "work"
-
-# Bookmarks
-suv bookmark add "docker compose up -d"
-suv bookmark list
-suv bookmark remove "docker compose up -d"
-
-# Notes
-suv note <id> -c "remember: this fixed the build"
-suv note <id>              # View
-suv note <id> --delete     # Remove
-```
-
-### Bulk Deletion
-
-```bash
-suv delete "rm -rf" --dry-run              # Preview before deleting
-suv delete "rm -rf"                        # Delete by substring
-suv delete "^git (commit|status)" --regex  # Delete by regex
-suv delete "" --before 2024-01-01          # Delete entries before a date
-```
-
-### Export & Import
-
-```bash
-# Export
-suv export > history.jsonl
-suv export --format csv > history.csv
-suv export --format json > history.json
-suv export --after 2025-01-01 --before 2025-06-01 > q1-q2.jsonl
-
-# Import
-suv import history.jsonl
-suv import history.jsonl --dry-run
-suv import --from zsh-history ~/.zsh_history
-```
-
-### Privacy
-
-Prefix a command with a space to prevent recording:
-
-```bash
- secret_command_here   # NOT saved to history
-```
-
-Configure exclusion patterns in `suv settings` → Exclusions, or in `config.toml`:
-
-```toml
-exclusions = ["^ls$", "^pwd$", "password"]
-```
-
----
-
-## Configuration
-
-**Config file location:**
-- macOS: `~/Library/Application Support/suvadu/config.toml`
-- Linux: `~/.config/suvadu/config.toml`
-
-### Interactive Settings
-
-```bash
-suv settings
-```
-
-Opens a TUI with tabs for Search, Shell, Exclusions, Auto Tags, and Theme.
-
-### Reference
-
-```toml
-# Master switch
-enabled = true
-
-# Theme: "dark", "light", or "terminal" (ANSI 16-color)
-theme = "dark"
-
-[search]
-page_limit = 50                      # Rows per page (10-5000)
-show_unique_by_default = false        # Start in deduplicated mode
-filter_by_current_session_tag = false # Scope search to current tag
-context_boost = true                  # Boost same-directory results (Smart mode)
-show_detail_pane = true               # Show detail pane on search open
-
-[shell]
-enable_arrow_navigation = true        # Up/Down arrows cycle history
-
-[auto_tags]
-"/Users/alice/work" = "work"
-"/Users/alice/personal" = "personal"
-
-# Regex exclusion patterns (invalid regex falls back to substring match)
-exclusions = ["^ls$", "^pwd$", "^cd$"]
-```
-
-### Exclusion Patterns
-
-| Pattern | Effect |
-|---------|--------|
-| `^ls$` | Ignores exactly `ls`, still records `ls -la` |
-| `password` | Ignores any command containing "password" |
-| `^git .*` | Ignores all git commands |
-
----
-
-## IDE & AI Agent Integrations
-
-### Claude Code
-
-```bash
-suv init claude-code
-```
-
-Installs PostToolUse, PostToolUseFailure, and UserPromptSubmit hooks. Also auto-configures the MCP server in `~/.claude.json`. Captures commands, exit codes, and prompts. Restart Claude Code after setup.
-
-### Cursor
-
-```bash
-suv init cursor
-```
-
-Installs `afterShellExecution` and `beforeSubmitPrompt` hooks into `~/.cursor/hooks.json`. Also auto-configures the MCP server in `~/.cursor/mcp.json`. Captures commands, exit codes, and prompts. Restart Cursor after setup.
-
-### Antigravity
-
-```bash
-suv init antigravity
-```
-
-Auto-detects Antigravity agent commands via the `$ANTIGRAVITY_AGENT` environment variable. No additional configuration needed. Note: Antigravity does not currently have a hooks system, so prompts cannot be captured — only commands are recorded.
-
-### OpenCode
-
-```bash
-suv init opencode
-```
-
-Installs a plugin at `~/.opencode/plugins/suvadu.js` that captures every bash command OpenCode executes, including the user prompt for agent command grouping. Restart OpenCode after setup.
-
-### Custom Agents
-
-For agents not natively supported, add detection rules via `suv settings` → Agents tab, or in `config.toml`:
-
-```toml
-[agents.your-agent]
-env_var = "YOUR_AGENT_ENV_VAR"
-executor_type = "agent"    # or "ide", "ci"
-```
-
-Restart your shell after adding agents (`source ~/.zshrc`).
-
-**Verify any integration:**
-
-```bash
-suv search --executor claude-code   # Claude Code
-suv search --executor cursor        # Cursor
-suv search --executor antigravity   # Antigravity
-suv search --executor opencode      # OpenCode
-```
-
-### MCP Server (Agent Memory)
-
-Suvadu includes an MCP server that gives AI agents direct access to your shell history. Auto-configured when you run `suv init claude-code` or `suv init cursor`.
-
-**Resources** (injected into agent context automatically):
-
-| Resource | Content |
-|----------|---------|
-| `suvadu://history/recent` | Last 20 commands with exit codes |
-| `suvadu://failures/recent` | Recent failures grouped by prompt |
-| `suvadu://stats/today` | Today's command count, success rate, top commands |
-| `suvadu://risk/summary` | Risk assessment of recent commands |
-| `suvadu://agents/activity` | Per-agent breakdown (commands, success rate) |
-| `suvadu://history/session/{id}` | Full session history (template) |
-
-**11 tools** (called by agents during reasoning):
-
-| Tool | Purpose |
-|------|---------|
-| `search_commands` | Search history by text, directory, executor, date |
-| `recent_commands` | What happened recently in a directory |
-| `command_status` | Has this command been run before? What happened? |
-| `get_prompts` | Browse prompts and the commands they triggered |
-| `session_history` | Full command history of a session |
-| `get_stats` | Aggregate statistics (top commands, success rate) |
-| `list_sessions` | Browse recent sessions |
-| `what_changed` | What file-modifying operations happened recently |
-| `what_failed` | What failed and which prompt caused it |
-| `suggest_next` | Predict next commands based on frecency |
-| `assess_risk` | Check if a command is safe before running it |
-
-**Manual setup** (if not using `suv init`):
-
-```bash
-# Claude Code
-claude mcp add --transport stdio suvadu -- suv mcp-serve
-
-# Cursor — add to ~/.cursor/mcp.json:
-# { "mcpServers": { "suvadu": { "command": "suv", "args": ["mcp-serve"] } } }
-```
-
-Then ask your agent: *"What commands failed in this project recently?"*
-
----
-
-## How It Works
-
-```
-┌──────────────────────────┐
-│     Zsh / Bash Shell     │
-│  preexec → start time    │
-│  precmd  → exit code,    │
-│            duration       │
-│  suv add → record entry  │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│    SQLite + WAL Mode     │
-│    suvadu/history.db     │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│    suv search (TUI)      │
-│    Ctrl+R binding        │
-│    Indexed queries       │
-│    Fast response          │
-└──────────────────────────┘
-```
-
-Shell hooks use native `$EPOCHREALTIME` (Zsh 5.1+ / Bash 5+) for millisecond-precision timestamps with zero external dependencies.
-
-**Database location:**
-- macOS: `~/Library/Application Support/suvadu/history.db`
-- Linux: `~/.local/share/suvadu/history.db`
-
-### Schema
-
-| Table | Key Columns |
-|-------|-------------|
-| `sessions` | `id` (UUID), `hostname`, `created_at`, `tag_id` |
-| `entries` | `command`, `cwd`, `exit_code`, `duration_ms`, `started_at`, `ended_at`, `executor_type`, `executor`, `tag_id`, `context` |
-| `tags` | `name`, `description` |
-
----
-
-## Command Reference
-
-| Command | Description |
-|---------|-------------|
-| **Search & Browse** | |
-| `suv search` | Interactive search TUI |
-| `suv search --query "git"` | Search with initial query |
-| `suv search --executor agent` | Filter by executor type |
-| `suv search --unique` | Deduplicated results |
-| `suv search --here` | Commands from current directory |
-| `suv search --field <field>` | Search by specific field (cwd, session, executor) |
-| `suv replay` | Replay current session as timeline |
-| `suv replay --after today --here` | Today's commands in this directory |
-| **Stats & Analytics** | |
-| `suv stats` | Interactive stats dashboard |
-| `suv stats --days 30` | Stats for the last 30 days |
-| `suv stats --text` | Plain text output |
-| `suv stats --tag <name>` | Stats filtered by tag |
-| **Agent Monitoring** | |
-| `suv agent dashboard` | Interactive agent monitoring TUI |
-| `suv agent dashboard --executor claude-code` | Filter to one agent |
-| `suv agent prompts` | Browse agent prompts and their commands |
-| `suv agent stats` | Per-agent analytics and risk breakdown |
-| `suv agent report` | Export agent activity report (text) |
-| `suv agent report --format markdown` | Export as markdown |
-| `suv agent report --format json` | Export as structured JSON |
-| **Organization** | |
-| `suv tag create <name>` | Create a tag |
-| `suv tag list` | List all tags |
-| `suv tag associate <name>` | Tag current session |
-| `suv bookmark add <cmd>` | Bookmark a command |
-| `suv bookmark list` | List all bookmarks |
-| `suv note <id> -c "note"` | Add a note to an entry |
-| `suv suggest-aliases` | Suggest shell aliases (interactive TUI) |
-| `suv alias add <name> <cmd>` | Create a shell alias |
-| `suv alias remove <name>` | Remove an alias |
-| `suv alias list` | List all aliases |
-| `suv alias apply` | Write aliases to sourceable file |
-| `suv alias add-suggested` | Interactive picker from history analysis |
-| `suv gc` | Garbage collect orphaned data and compact DB |
-| `suv session` | Interactive session timeline TUI |
-| **Recording Control** | |
-| `suv status` | Show recording status, command count, detected agents |
-| `suv enable` / `suv disable` | Toggle recording |
-| `suv pause` | Pause current session |
-| `suv settings` | Interactive settings TUI |
-| **Data** | |
-| `suv delete <pattern>` | Delete matching entries |
-| `suv export` | Export history as JSONL |
-| `suv export --format csv` | Export as CSV |
-| `suv export --format json` | Export as JSON |
-| `suv import <file>` | Import from JSONL file |
-| `suv import --from zsh-history` | Import from `~/.zsh_history` |
-| **Integration** | |
-| `suv wrap -- <cmd>` | Record a command from agents/scripts |
-| `suv init zsh` / `suv init bash` | Generate shell hooks |
-| `suv init claude-code` | Set up Claude Code capture |
-| `suv init cursor` | Set up Cursor tracking |
-| `suv init antigravity` | Set up Antigravity tracking |
-| `suv init opencode` | Set up OpenCode capture |
-| `suv mcp-serve` | Start MCP server for AI agent access to shell history |
-| **Utilities** | |
-| `suv completions <shell>` | Generate shell completions (zsh, bash, fish) |
-| `suv man` | Generate man page |
-| `suv update` | Update to latest version |
-| `suv uninstall` | Remove Suvadu |
-
----
-
 ## Development
 
 ```bash
 git clone https://github.com/AppachiTech/suvadu.git
 cd suvadu
-
 make dev      # Run the app
 make test     # Run tests
 make lint     # Run clippy + format check
-make help     # Show all available commands
 ```
 
-```bash
-cargo test                # Run all tests
-cargo fmt -- --check      # Check formatting
-cargo clippy -- -D warnings  # Lint
-cargo build --release     # Release build
-```
-
-### Release
-
-```bash
-make release-patch  # 0.1.0 → 0.1.1
-make release-minor  # 0.1.x → 0.2.0
-make release-major  # 0.x.x → 1.0.0
-```
-
----
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, project structure, and guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Security
 
-Suvadu automatically redacts detected API keys, tokens, and passwords before they reach the database. The database and config files are created with owner-only permissions (`0o600`). Self-update verifies binary signatures via Minisign. User-supplied regex is checked for ReDoS, SQL identifiers are allowlisted, and exported CSV values are sanitized against formula injection.
-
-For full details on vulnerability reporting, data storage design, and privacy features, see [SECURITY.md](SECURITY.md).
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, data storage design, and privacy details.
 
 ## License
 
-[MIT](LICENSE) — Appachi Tech
+[MIT](LICENSE)
