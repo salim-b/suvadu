@@ -63,9 +63,16 @@ impl SearchApp {
             };
 
             let in_filter = matches!(self.dialog, DialogState::Filter);
-            let search_border_color = if in_filter { t.border } else { t.border_focus };
+            let vim_normal = self.vim_enabled && self.vim_mode == super::VimMode::Normal;
+            let search_border_color = if in_filter || vim_normal {
+                t.border
+            } else {
+                t.border_focus
+            };
             let search_title = if in_filter {
                 "Search"
+            } else if vim_normal {
+                "Search (Normal)"
             } else {
                 "Search (Typing)"
             };
@@ -170,6 +177,39 @@ impl SearchApp {
         let t = theme();
         let badge_key_style = Style::default().bg(t.badge_bg).fg(t.text);
         let badge_label_style = Style::default().fg(t.text_secondary);
+
+        // Vim mode indicator
+        if self.vim_enabled {
+            let is_normal = self.vim_mode == super::VimMode::Normal;
+            let mut badges = vec![
+                Span::styled(
+                    if is_normal { " NORMAL " } else { " INSERT " },
+                    Style::default()
+                        .bg(if is_normal { t.primary } else { t.success })
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  ", badge_label_style),
+            ];
+            if is_normal {
+                badges.extend_from_slice(&[
+                    Span::styled(" j/k ", badge_key_style),
+                    Span::styled(" Nav  ", badge_label_style),
+                    Span::styled(" ^U/^D ", badge_key_style),
+                    Span::styled(" Scroll  ", badge_label_style),
+                    Span::styled(" / ", badge_key_style),
+                    Span::styled(" Search  ", badge_label_style),
+                    Span::styled(" q ", badge_key_style),
+                    Span::styled(" Quit  ", badge_label_style),
+                ]);
+            } else {
+                badges.extend_from_slice(&[
+                    Span::styled(" Esc ", badge_key_style),
+                    Span::styled(" Normal  ", badge_label_style),
+                ]);
+            }
+            return badges;
+        }
 
         vec![
             Span::styled(" Esc ", badge_key_style),
@@ -1377,6 +1417,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids,
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: unique,
                 context_boost: false,
@@ -1457,6 +1498,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: std::collections::HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -1496,6 +1538,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: std::collections::HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -1545,6 +1588,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: std::collections::HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -1661,6 +1705,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: std::collections::HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -1703,6 +1748,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: std::collections::HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -1745,6 +1791,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: std::collections::HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -2013,6 +2060,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids,
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,
@@ -2070,6 +2118,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: HashSet::new(),
             show_risk_in_search: false,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: true,
                 context_boost: false,
@@ -2214,6 +2263,7 @@ mod tests {
             filter_cwd: None,
             noted_entry_ids: noted,
             show_risk_in_search: show_risk,
+            vim_enabled: false,
             view: super::super::ViewOptions {
                 unique_mode: false,
                 context_boost: false,

@@ -44,6 +44,7 @@ fn test_search_config(entries: Vec<Entry>, total_items: usize) -> SearchConfig {
         filter_cwd: None,
         noted_entry_ids: std::collections::HashSet::new(),
         show_risk_in_search: false,
+        vim_enabled: false,
         view: ViewOptions {
             unique_mode: false,
             context_boost: true,
@@ -1436,4 +1437,323 @@ fn test_filter_other_key_ignored() {
     let action = app.handle_input(KeyEvent::from(KeyCode::F(5)));
     assert!(matches!(action, SearchAction::Continue));
     assert!(matches!(app.dialog, DialogState::Filter));
+}
+
+// ========================================================================
+// Vim mode tests
+// ========================================================================
+
+fn test_vim_config(entries: Vec<Entry>, total_items: usize) -> SearchConfig {
+    let mut cfg = test_search_config(entries, total_items);
+    cfg.vim_enabled = true;
+    cfg
+}
+
+#[test]
+fn test_vim_mode_defaults_to_insert() {
+    let app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    assert!(app.vim_enabled);
+    assert_eq!(app.vim_mode, VimMode::Insert);
+}
+
+#[test]
+fn test_vim_esc_switches_to_normal() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    assert_eq!(app.vim_mode, VimMode::Insert);
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Esc));
+    assert!(matches!(action, SearchAction::Continue));
+    assert_eq!(app.vim_mode, VimMode::Normal);
+}
+
+#[test]
+fn test_vim_slash_switches_to_insert() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    app.vim_mode = VimMode::Normal;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('/')));
+    assert!(matches!(action, SearchAction::Continue));
+    assert_eq!(app.vim_mode, VimMode::Insert);
+}
+
+#[test]
+fn test_vim_i_switches_to_insert() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    app.vim_mode = VimMode::Normal;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('i')));
+    assert!(matches!(action, SearchAction::Continue));
+    assert_eq!(app.vim_mode, VimMode::Insert);
+}
+
+#[test]
+fn test_vim_q_quits_in_normal_mode() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    app.vim_mode = VimMode::Normal;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('q')));
+    assert!(matches!(action, SearchAction::Exit));
+}
+
+#[test]
+fn test_vim_esc_quits_in_normal_mode() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    app.vim_mode = VimMode::Normal;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Esc));
+    assert!(matches!(action, SearchAction::Exit));
+}
+
+#[test]
+fn test_vim_j_navigates_down() {
+    let entries = vec![
+        create_test_entry("cmd1"),
+        create_test_entry("cmd2"),
+        create_test_entry("cmd3"),
+    ];
+    let mut app = SearchApp::new(test_vim_config(entries, 3));
+    app.vim_mode = VimMode::Normal;
+    assert_eq!(app.table_state.selected(), Some(0));
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(app.table_state.selected(), Some(1));
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(app.table_state.selected(), Some(2));
+}
+
+#[test]
+fn test_vim_k_navigates_up() {
+    let entries = vec![
+        create_test_entry("cmd1"),
+        create_test_entry("cmd2"),
+        create_test_entry("cmd3"),
+    ];
+    let mut app = SearchApp::new(test_vim_config(entries, 3));
+    app.vim_mode = VimMode::Normal;
+    // Start at bottom
+    app.table_state.select(Some(2));
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('k')));
+    assert_eq!(app.table_state.selected(), Some(1));
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('k')));
+    assert_eq!(app.table_state.selected(), Some(0));
+}
+
+#[test]
+fn test_vim_j_clamps_at_bottom() {
+    let entries = vec![create_test_entry("cmd1"), create_test_entry("cmd2")];
+    let mut app = SearchApp::new(test_vim_config(entries, 2));
+    app.vim_mode = VimMode::Normal;
+    app.table_state.select(Some(1)); // already at last
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(app.table_state.selected(), Some(1)); // stays at last
+}
+
+#[test]
+fn test_vim_k_clamps_at_top() {
+    let entries = vec![create_test_entry("cmd1"), create_test_entry("cmd2")];
+    let mut app = SearchApp::new(test_vim_config(entries, 2));
+    app.vim_mode = VimMode::Normal;
+    assert_eq!(app.table_state.selected(), Some(0)); // already at first
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('k')));
+    assert_eq!(app.table_state.selected(), Some(0)); // stays at first
+}
+
+#[test]
+fn test_vim_g_jumps_to_top() {
+    let entries = vec![
+        create_test_entry("cmd1"),
+        create_test_entry("cmd2"),
+        create_test_entry("cmd3"),
+    ];
+    let mut app = SearchApp::new(test_vim_config(entries, 3));
+    app.vim_mode = VimMode::Normal;
+    app.table_state.select(Some(2));
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('g')));
+    assert_eq!(app.table_state.selected(), Some(0));
+}
+
+#[test]
+fn test_vim_shift_g_jumps_to_bottom() {
+    let entries = vec![
+        create_test_entry("cmd1"),
+        create_test_entry("cmd2"),
+        create_test_entry("cmd3"),
+    ];
+    let mut app = SearchApp::new(test_vim_config(entries, 3));
+    app.vim_mode = VimMode::Normal;
+    assert_eq!(app.table_state.selected(), Some(0));
+
+    app.handle_input(KeyEvent::from(KeyCode::Char('G')));
+    assert_eq!(app.table_state.selected(), Some(2));
+}
+
+#[test]
+fn test_vim_enter_selects_in_normal_mode() {
+    let entries = vec![create_test_entry("cargo test")];
+    let mut app = SearchApp::new(test_vim_config(entries, 1));
+    app.vim_mode = VimMode::Normal;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Enter));
+    match action {
+        SearchAction::Select(cmd) => assert_eq!(cmd, "cargo test"),
+        other => panic!("Expected Select, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_vim_tab_toggles_detail_in_normal_mode() {
+    let entries = vec![create_test_entry("ls")];
+    let mut app = SearchApp::new(test_vim_config(entries, 1));
+    app.vim_mode = VimMode::Normal;
+    let was_open = app.view.detail_pane_open;
+
+    app.handle_input(KeyEvent::from(KeyCode::Tab));
+    assert_eq!(app.view.detail_pane_open, !was_open);
+}
+
+#[test]
+fn test_vim_typing_works_in_insert_mode() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    assert_eq!(app.vim_mode, VimMode::Insert);
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('g')));
+    assert!(matches!(action, SearchAction::Reload));
+    assert_eq!(app.query, "g");
+}
+
+#[test]
+fn test_vim_typing_does_not_work_in_normal_mode() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    app.vim_mode = VimMode::Normal;
+
+    // 'x' is not a vim binding, should be ignored
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('x')));
+    assert!(matches!(action, SearchAction::Continue));
+    assert_eq!(app.query, ""); // query unchanged
+}
+
+#[test]
+fn test_vim_ctrl_u_scrolls_up() {
+    let entries: Vec<Entry> = (0..20)
+        .map(|i| create_test_entry(&format!("cmd{i}")))
+        .collect();
+    let mut app = SearchApp::new(test_vim_config(entries, 20));
+    app.vim_mode = VimMode::Normal;
+    app.table_state.select(Some(15));
+
+    let key = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+    app.handle_input(key);
+    // half_page = 20/2 = 10, so 15-10 = 5
+    assert_eq!(app.table_state.selected(), Some(5));
+}
+
+#[test]
+fn test_vim_ctrl_d_scrolls_down() {
+    let entries: Vec<Entry> = (0..20)
+        .map(|i| create_test_entry(&format!("cmd{i}")))
+        .collect();
+    let mut app = SearchApp::new(test_vim_config(entries, 20));
+    app.vim_mode = VimMode::Normal;
+    app.table_state.select(Some(5));
+
+    let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+    app.handle_input(key);
+    // half_page = 10, so 5+10 = 15
+    assert_eq!(app.table_state.selected(), Some(15));
+}
+
+#[test]
+fn test_vim_ctrl_d_clamps_at_bottom() {
+    let entries: Vec<Entry> = (0..10)
+        .map(|i| create_test_entry(&format!("cmd{i}")))
+        .collect();
+    let mut app = SearchApp::new(test_vim_config(entries, 10));
+    app.vim_mode = VimMode::Normal;
+    app.table_state.select(Some(8));
+
+    let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+    app.handle_input(key);
+    // half_page = 5, 8+5 = 13, clamped to 9
+    assert_eq!(app.table_state.selected(), Some(9));
+}
+
+#[test]
+fn test_vim_ctrl_u_clamps_at_top() {
+    let entries: Vec<Entry> = (0..10)
+        .map(|i| create_test_entry(&format!("cmd{i}")))
+        .collect();
+    let mut app = SearchApp::new(test_vim_config(entries, 10));
+    app.vim_mode = VimMode::Normal;
+    app.table_state.select(Some(2));
+
+    let key = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+    app.handle_input(key);
+    // half_page = 5, 2-5 = saturates to 0
+    assert_eq!(app.table_state.selected(), Some(0));
+}
+
+#[test]
+fn test_vim_h_prev_page() {
+    let entries = vec![create_test_entry("cmd")];
+    let mut app = SearchApp::new(test_vim_config(entries, 100));
+    app.vim_mode = VimMode::Normal;
+    app.pagination.page = 3;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('h')));
+    match action {
+        SearchAction::SetPage(p) => assert_eq!(p, 2),
+        other => panic!("Expected SetPage(2), got {:?}", other),
+    }
+}
+
+#[test]
+fn test_vim_l_next_page() {
+    let entries = vec![create_test_entry("cmd")];
+    let mut app = SearchApp::new(test_vim_config(entries, 100));
+    app.vim_mode = VimMode::Normal;
+    app.pagination.page = 1;
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Char('l')));
+    match action {
+        SearchAction::SetPage(p) => assert_eq!(p, 2),
+        other => panic!("Expected SetPage(2), got {:?}", other),
+    }
+}
+
+#[test]
+fn test_vim_disabled_esc_still_exits() {
+    // When vim is NOT enabled, Esc should exit (not switch modes)
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    assert!(!app.vim_enabled);
+
+    let action = app.handle_input(KeyEvent::from(KeyCode::Esc));
+    assert!(matches!(action, SearchAction::Exit));
+}
+
+#[test]
+fn test_vim_mode_roundtrip() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    assert_eq!(app.vim_mode, VimMode::Insert);
+
+    // Insert → Normal via Esc
+    app.handle_input(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.vim_mode, VimMode::Normal);
+
+    // Normal → Insert via /
+    app.handle_input(KeyEvent::from(KeyCode::Char('/')));
+    assert_eq!(app.vim_mode, VimMode::Insert);
+
+    // Insert → Normal via Esc again
+    app.handle_input(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.vim_mode, VimMode::Normal);
+
+    // Normal → Insert via i
+    app.handle_input(KeyEvent::from(KeyCode::Char('i')));
+    assert_eq!(app.vim_mode, VimMode::Insert);
 }

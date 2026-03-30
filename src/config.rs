@@ -74,6 +74,8 @@ pub struct SearchConfig {
     pub context_boost: bool,
     #[serde(default = "default_true")]
     pub show_detail_pane: bool,
+    #[serde(default = "default_false")]
+    pub vim_mode: bool,
 }
 
 impl Default for SearchConfig {
@@ -84,6 +86,7 @@ impl Default for SearchConfig {
             filter_by_current_session_tag: false,
             context_boost: true,
             show_detail_pane: true,
+            vim_mode: false,
         }
     }
 }

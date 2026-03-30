@@ -53,7 +53,7 @@ impl SettingsTab {
 
     fn item_count(self, config: &Config) -> usize {
         match self {
-            Self::Search => 5,
+            Self::Search => 6,
             Self::Shell => 3,
             Self::Exclusions => config.exclusions.len(),
             Self::AutoTags => config.auto_tags.len(),
@@ -218,6 +218,10 @@ impl AppState {
             }
             (SettingsTab::Search, 4) => {
                 self.config.search.show_detail_pane = !self.config.search.show_detail_pane;
+                self.dirty = true;
+            }
+            (SettingsTab::Search, 5) => {
+                self.config.search.vim_mode = !self.config.search.vim_mode;
                 self.dirty = true;
             }
             (SettingsTab::Shell, 0) => {
@@ -829,6 +833,11 @@ fn render_search_tab(f: &mut ratatui::Frame, app: &AppState, area: Rect) {
             app.config.search.show_detail_pane,
             app.selected_item == 4,
         ),
+        setting_toggle(
+            "Vim Mode (j/k navigation, / to search, q to quit)",
+            app.config.search.vim_mode,
+            app.selected_item == 5,
+        ),
     ];
 
     let list = List::new(items)
@@ -1304,6 +1313,8 @@ mod tests {
         app.next_item();
         assert_eq!(app.selected_item, 4);
         app.next_item();
+        assert_eq!(app.selected_item, 5);
+        app.next_item();
         assert_eq!(app.selected_item, 0); // Cycle back
     }
 
@@ -1416,12 +1427,12 @@ mod tests {
         let config = Config::default();
         let mut app = AppState::new(config);
 
-        // Tab 0 has 5 items; going prev from 0 wraps to 4
+        // Tab 0 has 6 items; going prev from 0 wraps to 5
         assert_eq!(app.selected_item, 0);
         app.prev_item();
-        assert_eq!(app.selected_item, 4);
+        assert_eq!(app.selected_item, 5);
 
-        // And going next from 4 wraps to 0
+        // And going next from 5 wraps to 0
         app.next_item();
         assert_eq!(app.selected_item, 0);
     }

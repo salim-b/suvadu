@@ -91,6 +91,7 @@ See the [full integration guide](https://suvadu.sh/blog/track-ai-agent-commands-
 | **Organization** | Tags, bookmarks, notes, alias suggestions |
 | **Privacy** | Space-prefix exclusion, regex patterns, secret redaction, local-only |
 | **Arrow Keys** | Frecency-ranked Up/Down that prefers same-directory commands |
+| **Vim Bindings** | Optional vim-style `j`/`k`/`Ctrl+U`/`Ctrl+D` navigation in search TUI |
 
 Full feature documentation at [suvadu.sh/cli](https://suvadu.sh/cli/).
 

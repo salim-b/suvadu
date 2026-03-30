@@ -54,6 +54,16 @@ pub enum DialogState {
     Help,
 }
 
+/// Vim-style modal input mode for the search TUI.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VimMode {
+    /// Typing into the search box (default mode).
+    #[default]
+    Insert,
+    /// Navigate results with j/k, / to search, q to quit.
+    Normal,
+}
+
 /// Display/mode options that control how search results are presented.
 pub struct ViewOptions {
     pub unique_mode: bool,
@@ -118,6 +128,7 @@ pub struct SearchConfig {
     pub filter_cwd: Option<String>,
     pub noted_entry_ids: std::collections::HashSet<i64>,
     pub show_risk_in_search: bool,
+    pub vim_enabled: bool,
     pub view: ViewOptions,
 }
 
@@ -131,6 +142,8 @@ pub struct SearchApp {
     dialog: DialogState,
     pub view: ViewOptions,
     show_risk_in_search: bool,
+    pub vim_enabled: bool,
+    pub vim_mode: VimMode,
 
     // Unique mode counts (keyed by entry ID)
     pub unique_counts: std::collections::HashMap<i64, i64>,
@@ -197,6 +210,8 @@ impl SearchApp {
             dialog: DialogState::None,
             view,
             show_risk_in_search: cfg.show_risk_in_search,
+            vim_enabled: cfg.vim_enabled,
+            vim_mode: VimMode::Insert,
 
             unique_counts: cfg.unique_counts,
 
@@ -484,6 +499,7 @@ pub fn run_search(
         filter_cwd: args.cwd.map(String::from),
         noted_entry_ids,
         show_risk_in_search: config.agent.show_risk_in_search,
+        vim_enabled: config.search.vim_mode,
         view: ViewOptions {
             unique_mode: effective_unique,
             context_boost: config.search.context_boost,

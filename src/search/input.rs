@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{DialogState, SearchAction, SearchApp};
+use super::{DialogState, SearchAction, SearchApp, VimMode};
 use crate::util;
 
 /// Maximum length for any text input field (query, filters, notes, etc.).
@@ -27,9 +27,29 @@ impl SearchApp {
         // Handle Ctrl+key shortcuts first; ignore unrecognized Ctrl combos
         // to prevent them from falling through to the character input handler.
         if key.modifiers.contains(KeyModifiers::CONTROL) {
+            // In vim Normal mode, Ctrl+U/D are half-page scroll.
+            // In Insert mode, they keep original behavior (unique toggle / delete).
+            if self.vim_enabled && self.vim_mode == VimMode::Normal {
+                match key.code {
+                    KeyCode::Char('u') => {
+                        self.move_selection_up(self.half_page());
+                        return SearchAction::Continue;
+                    }
+                    KeyCode::Char('d') => {
+                        self.move_selection_down(self.half_page());
+                        return SearchAction::Continue;
+                    }
+                    _ => {}
+                }
+            }
             return self
                 .handle_ctrl_shortcut(key.code)
                 .unwrap_or(SearchAction::Continue);
+        }
+
+        // Vim normal mode: navigation keys instead of typing
+        if self.vim_enabled && self.vim_mode == VimMode::Normal {
+            return self.handle_vim_normal_input(key);
         }
 
         match key.code {
@@ -83,10 +103,109 @@ impl SearchApp {
                     return SearchAction::Select(cmd);
                 }
             }
-            KeyCode::Esc => return SearchAction::Exit,
+            KeyCode::Esc => {
+                if self.vim_enabled {
+                    self.vim_mode = VimMode::Normal;
+                    return SearchAction::Continue;
+                }
+                return SearchAction::Exit;
+            }
             _ => {}
         }
         SearchAction::Continue
+    }
+
+    /// Handle keys in vim normal mode: j/k navigate, / enters insert, q quits.
+    fn handle_vim_normal_input(&mut self, key: KeyEvent) -> SearchAction {
+        match key.code {
+            // Navigation
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(selected) = self.table_state.selected() {
+                    if selected + 1 < self.entries.len() {
+                        self.table_state.select(Some(selected + 1));
+                    }
+                } else if !self.entries.is_empty() {
+                    self.table_state.select(Some(0));
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(selected) = self.table_state.selected() {
+                    if selected > 0 {
+                        self.table_state.select(Some(selected - 1));
+                    }
+                }
+            }
+            // Half-page scroll
+            KeyCode::Char('G') => {
+                if !self.entries.is_empty() {
+                    self.table_state.select(Some(self.entries.len() - 1));
+                }
+            }
+            KeyCode::Char('g') => {
+                if !self.entries.is_empty() {
+                    self.table_state.select(Some(0));
+                }
+            }
+            // Page navigation
+            KeyCode::Left | KeyCode::Char('h') => {
+                if self.pagination.page > 1 {
+                    return SearchAction::SetPage(self.pagination.page - 1);
+                }
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                let total_pages = self
+                    .pagination
+                    .total_items
+                    .div_ceil(self.pagination.page_size);
+                if self.pagination.page < total_pages {
+                    return SearchAction::SetPage(self.pagination.page + 1);
+                }
+            }
+            // Switch to insert (search) mode
+            KeyCode::Char('/' | 'i') => {
+                self.vim_mode = VimMode::Insert;
+            }
+            // Actions
+            KeyCode::Enter => {
+                if let Some(cmd) = self.get_selected_command() {
+                    return SearchAction::Select(cmd);
+                }
+            }
+            KeyCode::Tab => {
+                self.view.detail_pane_open = !self.view.detail_pane_open;
+            }
+            KeyCode::Char('?') | KeyCode::F(1) => {
+                self.dialog = DialogState::Help;
+            }
+            // Quit
+            KeyCode::Char('q') | KeyCode::Esc => return SearchAction::Exit,
+            _ => {}
+        }
+        SearchAction::Continue
+    }
+
+    /// Move table selection up by `n` rows, clamping at 0.
+    fn move_selection_up(&mut self, n: usize) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let current = self.table_state.selected().unwrap_or(0);
+        self.table_state.select(Some(current.saturating_sub(n)));
+    }
+
+    /// Move table selection down by `n` rows, clamping at end.
+    fn move_selection_down(&mut self, n: usize) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let current = self.table_state.selected().unwrap_or(0);
+        let max = self.entries.len() - 1;
+        self.table_state.select(Some((current + n).min(max)));
+    }
+
+    /// Half the visible page size, minimum 1.
+    fn half_page(&self) -> usize {
+        (self.entries.len() / 2).max(1)
     }
 
     fn handle_ctrl_shortcut(&mut self, code: KeyCode) -> Option<SearchAction> {

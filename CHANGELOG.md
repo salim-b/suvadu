@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-03-30
+
+### Added
+- **Vim keybindings** — optional vim-style modal navigation in the search TUI. Enable with `vim_mode = true` in `[search]` config or via `suv settings` → Search → Vim Mode. Insert mode for typing, Normal mode for `j`/`k` navigation, `Ctrl+U`/`Ctrl+D` half-page scroll, `g`/`G` jump to top/bottom, `h`/`l` page navigation, `/` or `i` to return to search, `q` to quit. Off by default. See #13.
+
+### Changed
+- **Updated README** — slimmed down from 840 lines to ~120 lines, linking to [suvadu.sh](https://suvadu.sh) for full documentation. Updated logo assets to new chevron stack design.
+- **Updated website URL** — all references now point to `suvadu.sh` instead of `appachi.tech/suvadu`.
+
 ## [0.2.0] - 2026-03-25
 
 ### Added
