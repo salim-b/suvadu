@@ -10,6 +10,8 @@ use super::tools;
 /// All logging goes to stderr. The database is opened read-only.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let repo = Repository::init_read_only()?;
+    let config = crate::config::load_config().unwrap_or_default();
+    let mcp = &config.mcp;
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -46,15 +48,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             "notifications/initialized" => None,
             "tools/list" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
-                Some(tools::list_tools(rid))
+                Some(tools::list_tools(rid, mcp))
             }
             "tools/call" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
-                Some(handle_tool_call(&repo, rid, &request))
+                Some(handle_tool_call(&repo, rid, &request, mcp))
             }
             "resources/list" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
-                Some(resources::list_resources(rid))
+                Some(resources::list_resources(rid, mcp))
             }
             "resources/templates/list" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
@@ -62,7 +64,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "resources/read" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
-                Some(handle_resource_read(&repo, rid, &request))
+                Some(handle_resource_read(&repo, rid, &request, mcp))
             }
             "ping" => {
                 let rid = id.as_ref().unwrap_or(&serde_json::Value::Null);
@@ -92,12 +94,13 @@ fn handle_tool_call(
     repo: &Repository,
     id: &serde_json::Value,
     request: &serde_json::Value,
+    mcp: &crate::config::McpConfig,
 ) -> serde_json::Value {
     let name = request["params"]["name"].as_str().unwrap_or("");
     let empty = serde_json::Value::Object(serde_json::Map::new());
     let args = request["params"].get("arguments").unwrap_or(&empty);
 
-    match tools::call_tool(repo, name, args) {
+    match tools::call_tool(repo, name, args, mcp) {
         Ok(text) => protocol::tool_result(id, &text),
         Err(msg) => protocol::tool_error(id, &msg),
     }
@@ -107,9 +110,10 @@ fn handle_resource_read(
     repo: &Repository,
     id: &serde_json::Value,
     request: &serde_json::Value,
+    mcp: &crate::config::McpConfig,
 ) -> serde_json::Value {
     let uri = request["params"]["uri"].as_str().unwrap_or("");
-    match resources::read_resource(repo, uri) {
+    match resources::read_resource(repo, uri, mcp) {
         Ok(result) => serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -141,7 +145,8 @@ mod tests {
                 "arguments": {}
             }
         });
-        let resp = handle_tool_call(&repo, &json!(1), &req);
+        let mcp = crate::config::McpConfig::default();
+        let resp = handle_tool_call(&repo, &json!(1), &req, &mcp);
         assert_eq!(resp["result"]["isError"], true);
     }
 
@@ -154,7 +159,8 @@ mod tests {
                 "arguments": {"query": "test"}
             }
         });
-        let resp = handle_tool_call(&repo, &json!(1), &req);
+        let mcp = crate::config::McpConfig::default();
+        let resp = handle_tool_call(&repo, &json!(1), &req, &mcp);
         assert_eq!(resp["result"]["isError"], false);
         assert!(resp["result"]["content"][0]["text"]
             .as_str()

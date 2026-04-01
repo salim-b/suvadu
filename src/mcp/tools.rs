@@ -9,35 +9,49 @@ use crate::util;
 /// Maximum number of replay entries to fetch when grouping prompts.
 const MAX_PROMPT_ENTRIES: usize = 5000;
 
-/// Return the `tools/list` response with all tool definitions.
-pub fn list_tools(id: &Value) -> Value {
+/// Return the `tools/list` response, filtering out disabled tools.
+pub fn list_tools(id: &Value, mcp: &crate::config::McpConfig) -> Value {
+    let all_tools = vec![
+        search_commands_def(),
+        recent_commands_def(),
+        command_status_def(),
+        get_prompts_def(),
+        session_history_def(),
+        get_stats_def(),
+        list_sessions_def(),
+        what_changed_def(),
+        what_failed_def(),
+        suggest_next_def(),
+        assess_risk_def(),
+        find_agent_session_def(),
+        replay_agent_session_def(),
+        learn_from_failures_def(),
+        project_context_def(),
+    ];
+    let tools: Vec<Value> = all_tools
+        .into_iter()
+        .filter(|t| {
+            let name = t["name"].as_str().unwrap_or("");
+            !mcp.disabled_tools.iter().any(|d| d == name)
+        })
+        .collect();
     json!({
         "jsonrpc": "2.0",
         "id": id,
-        "result": {
-            "tools": [
-                search_commands_def(),
-                recent_commands_def(),
-                command_status_def(),
-                get_prompts_def(),
-                session_history_def(),
-                get_stats_def(),
-                list_sessions_def(),
-                what_changed_def(),
-                what_failed_def(),
-                suggest_next_def(),
-                assess_risk_def(),
-                find_agent_session_def(),
-                replay_agent_session_def(),
-                learn_from_failures_def(),
-                project_context_def(),
-            ]
-        }
+        "result": { "tools": tools }
     })
 }
 
 /// Dispatch a `tools/call` request to the appropriate handler.
-pub fn call_tool(repo: &Repository, name: &str, args: &Value) -> Result<String, String> {
+pub fn call_tool(
+    repo: &Repository,
+    name: &str,
+    args: &Value,
+    mcp: &crate::config::McpConfig,
+) -> Result<String, String> {
+    if mcp.disabled_tools.iter().any(|d| d == name) {
+        return Err(format!("Tool '{name}' is disabled via MCP configuration"));
+    }
     match name {
         "search_commands" => handle_search_commands(repo, args),
         "recent_commands" => handle_recent_commands(repo, args),
@@ -1738,9 +1752,36 @@ fn handle_project_context(repo: &Repository, args: &Value) -> Result<String, Str
 mod tests {
     use super::*;
 
+    fn default_mcp() -> crate::config::McpConfig {
+        crate::config::McpConfig::default()
+    }
+
+    #[test]
+    fn test_list_tools_with_disabled() {
+        let mut mcp = default_mcp();
+        mcp.disabled_tools = vec!["assess_risk".to_string(), "suggest_next".to_string()];
+        let resp = list_tools(&json!(1), &mcp);
+        let tools = resp["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 13);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(!names.contains(&"assess_risk"));
+        assert!(!names.contains(&"suggest_next"));
+        assert!(names.contains(&"search_commands"));
+    }
+
+    #[test]
+    fn test_call_disabled_tool_returns_error() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let mut mcp = default_mcp();
+        mcp.disabled_tools = vec!["search_commands".to_string()];
+        let result = call_tool(&repo, "search_commands", &json!({"query": "test"}), &mcp);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("disabled"));
+    }
+
     #[test]
     fn test_list_tools_count() {
-        let resp = list_tools(&json!(1));
+        let resp = list_tools(&json!(1), &default_mcp());
         let tools = resp["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 15);
 
@@ -1764,7 +1805,7 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_have_required_fields() {
-        let resp = list_tools(&json!(1));
+        let resp = list_tools(&json!(1), &default_mcp());
         let tools = resp["result"]["tools"].as_array().unwrap();
         for tool in tools {
             assert!(tool["name"].is_string(), "tool missing name");
@@ -1780,7 +1821,7 @@ mod tests {
     #[test]
     fn test_call_unknown_tool() {
         let repo = crate::test_utils::test_repo().1;
-        let result = call_tool(&repo, "nonexistent", &json!({}));
+        let result = call_tool(&repo, "nonexistent", &json!({}), &default_mcp());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown tool"));
     }
@@ -1788,7 +1829,12 @@ mod tests {
     #[test]
     fn test_search_commands_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "search_commands", &json!({"query": "git"}));
+        let result = call_tool(
+            &repo,
+            "search_commands",
+            &json!({"query": "git"}),
+            &default_mcp(),
+        );
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No commands found"));
     }
@@ -1796,7 +1842,7 @@ mod tests {
     #[test]
     fn test_recent_commands_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "recent_commands", &json!({}));
+        let result = call_tool(&repo, "recent_commands", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No recent commands"));
     }
@@ -1804,14 +1850,14 @@ mod tests {
     #[test]
     fn test_command_status_requires_command() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "command_status", &json!({}));
+        let result = call_tool(&repo, "command_status", &json!({}), &default_mcp());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_list_sessions_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "list_sessions", &json!({}));
+        let result = call_tool(&repo, "list_sessions", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No sessions found"));
     }
@@ -1819,7 +1865,7 @@ mod tests {
     #[test]
     fn test_get_prompts_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "get_prompts", &json!({}));
+        let result = call_tool(&repo, "get_prompts", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No agent prompts"));
     }
@@ -1847,7 +1893,12 @@ mod tests {
         );
         repo.insert_entry(&entry).unwrap();
 
-        let result = call_tool(&repo, "search_commands", &json!({"query": "cargo"}));
+        let result = call_tool(
+            &repo,
+            "search_commands",
+            &json!({"query": "cargo"}),
+            &default_mcp(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(text.contains("cargo test"));
@@ -1893,6 +1944,7 @@ mod tests {
             &repo,
             "search_commands",
             &json!({"query": "cargo build", "exit_code": 0}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -1909,6 +1961,7 @@ mod tests {
             &repo,
             "search_commands",
             &json!({"query": "cargo build", "exit_code": 1}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -1949,7 +2002,12 @@ mod tests {
         );
         repo.insert_entry(&fail_entry).unwrap();
 
-        let result = call_tool(&repo, "command_status", &json!({"command": "make test"}));
+        let result = call_tool(
+            &repo,
+            "command_status",
+            &json!({"command": "make test"}),
+            &default_mcp(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -1989,7 +2047,7 @@ mod tests {
         entry.executor = Some("claude-code".to_string());
         repo.insert_entry(&entry).unwrap();
 
-        let result = call_tool(&repo, "get_prompts", &json!({}));
+        let result = call_tool(&repo, "get_prompts", &json!({}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2007,7 +2065,7 @@ mod tests {
     #[test]
     fn test_what_changed_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "what_changed", &json!({}));
+        let result = call_tool(&repo, "what_changed", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No file-modifying operations"));
     }
@@ -2039,7 +2097,7 @@ mod tests {
             repo.insert_entry(&entry).unwrap();
         }
 
-        let result = call_tool(&repo, "what_changed", &json!({"hours": 1}));
+        let result = call_tool(&repo, "what_changed", &json!({"hours": 1}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(text.contains("DELETIONS"), "should classify rm: {text}");
@@ -2056,7 +2114,7 @@ mod tests {
     #[test]
     fn test_what_failed_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "what_failed", &json!({}));
+        let result = call_tool(&repo, "what_failed", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No failures"));
     }
@@ -2088,7 +2146,7 @@ mod tests {
         entry.executor = Some("claude-code".to_string());
         repo.insert_entry(&entry).unwrap();
 
-        let result = call_tool(&repo, "what_failed", &json!({}));
+        let result = call_tool(&repo, "what_failed", &json!({}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(text.contains("1 failure"), "should count failure: {text}");
@@ -2099,7 +2157,7 @@ mod tests {
     #[test]
     fn test_suggest_next_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "suggest_next", &json!({}));
+        let result = call_tool(&repo, "suggest_next", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No recent commands"));
     }
@@ -2138,7 +2196,7 @@ mod tests {
         );
         repo.insert_entry(&entry).unwrap();
 
-        let result = call_tool(&repo, "suggest_next", &json!({}));
+        let result = call_tool(&repo, "suggest_next", &json!({}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2340,7 +2398,7 @@ mod tests {
     #[test]
     fn test_find_agent_session_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "find_agent_session", &json!({}));
+        let result = call_tool(&repo, "find_agent_session", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(
             result.unwrap().contains("No agent sessions found"),
@@ -2352,7 +2410,7 @@ mod tests {
     fn test_find_agent_session_with_data() {
         let (_dir, repo) = crate::test_utils::test_repo();
         seed_agent_sessions(&repo);
-        let result = call_tool(&repo, "find_agent_session", &json!({}));
+        let result = call_tool(&repo, "find_agent_session", &json!({}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2377,6 +2435,7 @@ mod tests {
             &repo,
             "find_agent_session",
             &json!({"directory": "/project"}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -2394,7 +2453,12 @@ mod tests {
     fn test_find_agent_session_filter_by_executor() {
         let (_dir, repo) = crate::test_utils::test_repo();
         seed_agent_sessions(&repo);
-        let result = call_tool(&repo, "find_agent_session", &json!({"executor": "cursor"}));
+        let result = call_tool(
+            &repo,
+            "find_agent_session",
+            &json!({"executor": "cursor"}),
+            &default_mcp(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2412,7 +2476,7 @@ mod tests {
         let (_dir, repo) = crate::test_utils::test_repo();
         seed_agent_sessions(&repo);
         // First verify entries exist by checking without prompt filter
-        let all = call_tool(&repo, "find_agent_session", &json!({}));
+        let all = call_tool(&repo, "find_agent_session", &json!({}), &default_mcp());
         assert!(all.is_ok());
         let all_text = all.unwrap();
         assert!(
@@ -2421,7 +2485,12 @@ mod tests {
         );
 
         // Now test with prompt filter
-        let result = call_tool(&repo, "find_agent_session", &json!({"prompt_text": "auth"}));
+        let result = call_tool(
+            &repo,
+            "find_agent_session",
+            &json!({"prompt_text": "auth"}),
+            &default_mcp(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2442,6 +2511,7 @@ mod tests {
             &repo,
             "find_agent_session",
             &json!({"executor": "claude-code"}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -2458,6 +2528,7 @@ mod tests {
             &repo,
             "replay_agent_session",
             &json!({"session_id": "nonexistent"}),
+            &default_mcp(),
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No session found"));
@@ -2471,6 +2542,7 @@ mod tests {
             &repo,
             "replay_agent_session",
             &json!({"session_id": "claude-abc123"}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -2501,6 +2573,7 @@ mod tests {
             &repo,
             "replay_agent_session",
             &json!({"session_id": "abc123"}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -2518,6 +2591,7 @@ mod tests {
             &repo,
             "replay_agent_session",
             &json!({"session_id": "claude-abc123"}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -2530,7 +2604,7 @@ mod tests {
     #[test]
     fn test_replay_agent_session_requires_session_id() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "replay_agent_session", &json!({}));
+        let result = call_tool(&repo, "replay_agent_session", &json!({}), &default_mcp());
         assert!(result.is_err());
     }
 
@@ -2539,7 +2613,7 @@ mod tests {
     #[test]
     fn test_learn_from_failures_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "learn_from_failures", &json!({}));
+        let result = call_tool(&repo, "learn_from_failures", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No command history"));
     }
@@ -2573,7 +2647,7 @@ mod tests {
             repo.insert_entry(&e).unwrap();
         }
 
-        let result = call_tool(&repo, "learn_from_failures", &json!({}));
+        let result = call_tool(&repo, "learn_from_failures", &json!({}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2612,7 +2686,7 @@ mod tests {
             repo.insert_entry(&e).unwrap();
         }
 
-        let result = call_tool(&repo, "learn_from_failures", &json!({}));
+        let result = call_tool(&repo, "learn_from_failures", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(
             result.unwrap().contains("No recurring failures"),
@@ -2625,7 +2699,7 @@ mod tests {
     #[test]
     fn test_project_context_empty_db() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = call_tool(&repo, "project_context", &json!({}));
+        let result = call_tool(&repo, "project_context", &json!({}), &default_mcp());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("No command history"));
     }
@@ -2635,7 +2709,7 @@ mod tests {
         let (_dir, repo) = crate::test_utils::test_repo();
         seed_agent_sessions(&repo);
 
-        let result = call_tool(&repo, "project_context", &json!({}));
+        let result = call_tool(&repo, "project_context", &json!({}), &default_mcp());
         assert!(result.is_ok());
         let text = result.unwrap();
         assert!(
@@ -2657,6 +2731,7 @@ mod tests {
             &repo,
             "project_context",
             &json!({"directory": "/other-project"}),
+            &default_mcp(),
         );
         assert!(result.is_ok());
         let text = result.unwrap();

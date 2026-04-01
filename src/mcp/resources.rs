@@ -11,56 +11,28 @@ use chrono::TimeZone;
 // ── Resource catalog ────────────────────────────────────────
 
 /// Return the `resources/list` response.
-pub fn list_resources(id: &Value) -> Value {
+pub fn list_resources(id: &Value, mcp: &crate::config::McpConfig) -> Value {
+    let all_resources = vec![
+        json!({"uri": "suvadu://history/recent", "name": "Recent Commands", "description": "Last 20 commands with exit codes, directories, and executors", "mimeType": "text/plain"}),
+        json!({"uri": "suvadu://failures/recent", "name": "Recent Failures", "description": "Commands that failed in the last 24 hours, grouped by prompt", "mimeType": "text/plain"}),
+        json!({"uri": "suvadu://stats/today", "name": "Today's Stats", "description": "Command count, success rate, top commands, and top directories for today", "mimeType": "text/plain"}),
+        json!({"uri": "suvadu://risk/summary", "name": "Risk Summary", "description": "Risk assessment summary of recent agent commands", "mimeType": "text/plain"}),
+        json!({"uri": "suvadu://agents/activity", "name": "Agent Activity", "description": "Overview of AI agent activity: which agents, how many commands, success rates", "mimeType": "text/plain"}),
+        json!({"uri": "suvadu://agents/sessions", "name": "Recent Agent Sessions", "description": "Summary of the 5 most recent AI agent sessions, with prompts and command counts", "mimeType": "text/plain"}),
+        json!({"uri": "suvadu://context/project", "name": "Project Context", "description": "Project briefing for the current directory: common commands, recent failures, agent activity, and workflow tips", "mimeType": "text/plain"}),
+    ];
+    let resources: Vec<Value> = all_resources
+        .into_iter()
+        .filter(|r| {
+            let uri = r["uri"].as_str().unwrap_or("");
+            let suffix = uri.strip_prefix("suvadu://").unwrap_or(uri);
+            !mcp.disabled_resources.iter().any(|d| d == suffix)
+        })
+        .collect();
     json!({
         "jsonrpc": "2.0",
         "id": id,
-        "result": {
-            "resources": [
-                {
-                    "uri": "suvadu://history/recent",
-                    "name": "Recent Commands",
-                    "description": "Last 20 commands with exit codes, directories, and executors",
-                    "mimeType": "text/plain"
-                },
-                {
-                    "uri": "suvadu://failures/recent",
-                    "name": "Recent Failures",
-                    "description": "Commands that failed in the last 24 hours, grouped by prompt",
-                    "mimeType": "text/plain"
-                },
-                {
-                    "uri": "suvadu://stats/today",
-                    "name": "Today's Stats",
-                    "description": "Command count, success rate, top commands, and top directories for today",
-                    "mimeType": "text/plain"
-                },
-                {
-                    "uri": "suvadu://risk/summary",
-                    "name": "Risk Summary",
-                    "description": "Risk assessment summary of recent agent commands",
-                    "mimeType": "text/plain"
-                },
-                {
-                    "uri": "suvadu://agents/activity",
-                    "name": "Agent Activity",
-                    "description": "Overview of AI agent activity: which agents, how many commands, success rates",
-                    "mimeType": "text/plain"
-                },
-                {
-                    "uri": "suvadu://agents/sessions",
-                    "name": "Recent Agent Sessions",
-                    "description": "Summary of the 5 most recent AI agent sessions, with prompts and command counts",
-                    "mimeType": "text/plain"
-                },
-                {
-                    "uri": "suvadu://context/project",
-                    "name": "Project Context",
-                    "description": "Project briefing for the current directory: common commands, recent failures, agent activity, and workflow tips",
-                    "mimeType": "text/plain"
-                }
-            ]
-        }
+        "result": { "resources": resources }
     })
 }
 
@@ -85,7 +57,17 @@ pub fn list_resource_templates(id: &Value) -> Value {
 // ── Resource reader ─────────────────────────────────────────
 
 /// Read a resource by URI. Returns the text content or an error.
-pub fn read_resource(repo: &Repository, uri: &str) -> Result<Value, String> {
+pub fn read_resource(
+    repo: &Repository,
+    uri: &str,
+    mcp: &crate::config::McpConfig,
+) -> Result<Value, String> {
+    let suffix = uri.strip_prefix("suvadu://").unwrap_or(uri);
+    if mcp.disabled_resources.iter().any(|d| d == suffix) {
+        return Err(format!(
+            "Resource '{uri}' is disabled via MCP configuration"
+        ));
+    }
     let content = match uri {
         "suvadu://history/recent" => read_recent_history(repo)?,
         "suvadu://failures/recent" => read_recent_failures(repo)?,
@@ -688,7 +670,8 @@ mod tests {
 
     #[test]
     fn test_list_resources_count() {
-        let resp = list_resources(&json!(1));
+        let mcp = crate::config::McpConfig::default();
+        let resp = list_resources(&json!(1), &mcp);
         let resources = resp["result"]["resources"].as_array().unwrap();
         assert_eq!(resources.len(), 7);
         for r in resources {
@@ -696,6 +679,32 @@ mod tests {
             assert!(r["name"].is_string());
             assert!(r["mimeType"].is_string());
         }
+    }
+
+    #[test]
+    fn test_list_resources_with_disabled() {
+        let mut mcp = crate::config::McpConfig::default();
+        mcp.disabled_resources = vec!["context/project".to_string(), "risk/summary".to_string()];
+        let resp = list_resources(&json!(1), &mcp);
+        let resources = resp["result"]["resources"].as_array().unwrap();
+        assert_eq!(resources.len(), 5);
+        let uris: Vec<&str> = resources
+            .iter()
+            .map(|r| r["uri"].as_str().unwrap())
+            .collect();
+        assert!(!uris.contains(&"suvadu://context/project"));
+        assert!(!uris.contains(&"suvadu://risk/summary"));
+        assert!(uris.contains(&"suvadu://history/recent"));
+    }
+
+    #[test]
+    fn test_read_disabled_resource_returns_error() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let mut mcp = crate::config::McpConfig::default();
+        mcp.disabled_resources = vec!["history/recent".to_string()];
+        let result = read_resource(&repo, "suvadu://history/recent", &mcp);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("disabled"));
     }
 
     #[test]
@@ -712,7 +721,11 @@ mod tests {
     #[test]
     fn test_read_recent_history_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://history/recent");
+        let result = read_resource(
+            &repo,
+            "suvadu://history/recent",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         let val = result.unwrap();
         assert!(val["contents"][0]["text"]
@@ -724,7 +737,11 @@ mod tests {
     #[test]
     fn test_read_failures_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://failures/recent");
+        let result = read_resource(
+            &repo,
+            "suvadu://failures/recent",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         assert!(result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -735,7 +752,11 @@ mod tests {
     #[test]
     fn test_read_stats_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://stats/today");
+        let result = read_resource(
+            &repo,
+            "suvadu://stats/today",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         assert!(result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -746,14 +767,22 @@ mod tests {
     #[test]
     fn test_read_risk_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://risk/summary");
+        let result = read_resource(
+            &repo,
+            "suvadu://risk/summary",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_read_agents_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://agents/activity");
+        let result = read_resource(
+            &repo,
+            "suvadu://agents/activity",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         assert!(result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -764,7 +793,11 @@ mod tests {
     #[test]
     fn test_read_agent_sessions_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://agents/sessions");
+        let result = read_resource(
+            &repo,
+            "suvadu://agents/sessions",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         assert!(result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -799,7 +832,11 @@ mod tests {
         entry.executor = Some("claude-code".into());
         repo.insert_entry(&entry).unwrap();
 
-        let result = read_resource(&repo, "suvadu://agents/sessions");
+        let result = read_resource(
+            &repo,
+            "suvadu://agents/sessions",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -819,7 +856,11 @@ mod tests {
     #[test]
     fn test_read_project_context_empty() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://context/project");
+        let result = read_resource(
+            &repo,
+            "suvadu://context/project",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         assert!(result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -854,7 +895,11 @@ mod tests {
             repo.insert_entry(&entry).unwrap();
         }
 
-        let result = read_resource(&repo, "suvadu://context/project");
+        let result = read_resource(
+            &repo,
+            "suvadu://context/project",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap()["contents"][0]["text"]
             .as_str()
@@ -870,14 +915,22 @@ mod tests {
     #[test]
     fn test_read_unknown_resource() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://nonexistent");
+        let result = read_resource(
+            &repo,
+            "suvadu://nonexistent",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_session_empty_id() {
         let (_dir, repo) = crate::test_utils::test_repo();
-        let result = read_resource(&repo, "suvadu://history/session/");
+        let result = read_resource(
+            &repo,
+            "suvadu://history/session/",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_err());
     }
 
@@ -902,7 +955,11 @@ mod tests {
         );
         repo.insert_entry(&entry).unwrap();
 
-        let result = read_resource(&repo, "suvadu://history/recent");
+        let result = read_resource(
+            &repo,
+            "suvadu://history/recent",
+            &crate::config::McpConfig::default(),
+        );
         assert!(result.is_ok());
         let text = result.unwrap()["contents"][0]["text"]
             .as_str()

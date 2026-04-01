@@ -39,6 +39,8 @@ pub struct Config {
     pub auto_tags: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub agents: std::collections::HashMap<String, CustomAgent>,
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 const fn default_enabled() -> bool {
@@ -57,6 +59,7 @@ impl Default for Config {
             exclusions: Vec::new(),
             auto_tags: std::collections::HashMap::new(),
             agents: std::collections::HashMap::new(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -166,6 +169,34 @@ pub struct CustomAgent {
 
 fn default_agent_type() -> String {
     "agent".to_string()
+}
+
+/// MCP server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpConfig {
+    /// Tools to disable by name. Empty means all enabled.
+    pub disabled_tools: Vec<String>,
+    /// Resources to disable by URI suffix (e.g. "context/project"). Empty means all enabled.
+    pub disabled_resources: Vec<String>,
+    /// Default time window in days for tools that accept a `days` parameter.
+    pub default_days: u32,
+    /// Default result limit for tools that accept a `limit` parameter.
+    pub default_limit: u32,
+    /// Directories to exclude from MCP queries.
+    pub exclude_dirs: Vec<String>,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            disabled_tools: Vec::new(),
+            disabled_resources: Vec::new(),
+            default_days: 7,
+            default_limit: 20,
+            exclude_dirs: Vec::new(),
+        }
+    }
 }
 
 const fn default_true() -> bool {
@@ -315,6 +346,16 @@ fn validate_config(config: &Config) -> ConfigResult<()> {
                 "exclusion patterns must not be empty".into(),
             ));
         }
+    }
+    if config.mcp.default_days == 0 || config.mcp.default_days > 365 {
+        return Err(ConfigError::Path(
+            "mcp.default_days must be between 1 and 365".into(),
+        ));
+    }
+    if config.mcp.default_limit == 0 || config.mcp.default_limit > 500 {
+        return Err(ConfigError::Path(
+            "mcp.default_limit must be between 1 and 500".into(),
+        ));
     }
     Ok(())
 }
@@ -508,5 +549,80 @@ enabled = true
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.agents.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_config_defaults() {
+        let config = Config::default();
+        assert_eq!(config.mcp.default_days, 7);
+        assert_eq!(config.mcp.default_limit, 20);
+        assert!(config.mcp.disabled_tools.is_empty());
+        assert!(config.mcp.disabled_resources.is_empty());
+        assert!(config.mcp.exclude_dirs.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_config_deserialization() {
+        let toml_str = r#"
+[mcp]
+disabled_tools = ["assess_risk", "suggest_next"]
+disabled_resources = ["context/project"]
+default_days = 14
+default_limit = 50
+exclude_dirs = ["/secrets", "~/.ssh"]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mcp.default_days, 14);
+        assert_eq!(config.mcp.default_limit, 50);
+        assert_eq!(config.mcp.disabled_tools.len(), 2);
+        assert!(config
+            .mcp
+            .disabled_tools
+            .contains(&"assess_risk".to_string()));
+        assert!(config
+            .mcp
+            .disabled_tools
+            .contains(&"suggest_next".to_string()));
+        assert_eq!(config.mcp.disabled_resources, vec!["context/project"]);
+        assert_eq!(config.mcp.exclude_dirs.len(), 2);
+    }
+
+    #[test]
+    fn test_mcp_config_missing_section_uses_defaults() {
+        let toml_str = r#"
+enabled = true
+[search]
+page_limit = 100
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mcp.default_days, 7);
+        assert_eq!(config.mcp.default_limit, 20);
+        assert!(config.mcp.disabled_tools.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_config_validation_days() {
+        let mut config = Config::default();
+        config.mcp.default_days = 0;
+        assert!(validate_config(&config).is_err());
+
+        config.mcp.default_days = 366;
+        assert!(validate_config(&config).is_err());
+
+        config.mcp.default_days = 30;
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn test_mcp_config_validation_limit() {
+        let mut config = Config::default();
+        config.mcp.default_limit = 0;
+        assert!(validate_config(&config).is_err());
+
+        config.mcp.default_limit = 501;
+        assert!(validate_config(&config).is_err());
+
+        config.mcp.default_limit = 100;
+        assert!(validate_config(&config).is_ok());
     }
 }

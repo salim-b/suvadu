@@ -16,6 +16,34 @@ use std::io;
 
 const EXECUTOR_TYPES: &[&str] = &["agent", "ide", "ci"];
 
+const MCP_TOOLS: &[&str] = &[
+    "search_commands",
+    "recent_commands",
+    "command_status",
+    "get_prompts",
+    "session_history",
+    "get_stats",
+    "list_sessions",
+    "what_changed",
+    "what_failed",
+    "suggest_next",
+    "assess_risk",
+    "find_agent_session",
+    "replay_agent_session",
+    "learn_from_failures",
+    "project_context",
+];
+
+const MCP_RESOURCES: &[&str] = &[
+    "history/recent",
+    "failures/recent",
+    "stats/today",
+    "risk/summary",
+    "agents/activity",
+    "agents/sessions",
+    "context/project",
+];
+
 #[derive(Debug, PartialEq)]
 enum InputMode {
     Normal,
@@ -30,6 +58,7 @@ enum SettingsTab {
     Exclusions,
     AutoTags,
     Agents,
+    Mcp,
 }
 
 impl SettingsTab {
@@ -39,6 +68,7 @@ impl SettingsTab {
         Self::Exclusions,
         Self::AutoTags,
         Self::Agents,
+        Self::Mcp,
     ];
 
     const fn index(self) -> usize {
@@ -48,6 +78,7 @@ impl SettingsTab {
             Self::Exclusions => 2,
             Self::AutoTags => 3,
             Self::Agents => 4,
+            Self::Mcp => 5,
         }
     }
 
@@ -58,6 +89,7 @@ impl SettingsTab {
             Self::Exclusions => config.exclusions.len(),
             Self::AutoTags => config.auto_tags.len(),
             Self::Agents => config.agents.len(),
+            Self::Mcp => 2 + MCP_TOOLS.len() + MCP_RESOURCES.len() + config.mcp.exclude_dirs.len(),
         }
     }
 
@@ -67,17 +99,19 @@ impl SettingsTab {
             Self::Shell => Self::Exclusions,
             Self::Exclusions => Self::AutoTags,
             Self::AutoTags => Self::Agents,
-            Self::Agents => Self::Search,
+            Self::Agents => Self::Mcp,
+            Self::Mcp => Self::Search,
         }
     }
 
     const fn prev(self) -> Self {
         match self {
-            Self::Search => Self::Agents,
+            Self::Search => Self::Mcp,
             Self::Shell => Self::Search,
             Self::Exclusions => Self::Shell,
             Self::AutoTags => Self::Exclusions,
             Self::Agents => Self::AutoTags,
+            Self::Mcp => Self::Agents,
         }
     }
 
@@ -88,6 +122,7 @@ impl SettingsTab {
             Self::Exclusions => "Exclusions",
             Self::AutoTags => "Auto Tags",
             Self::Agents => "Agents",
+            Self::Mcp => "MCP",
         }
     }
 }
@@ -302,6 +337,30 @@ impl AppState {
                 self.auto_tag_name_input.clear();
                 self.auto_tag_focus = 0;
             }
+            KeyCode::Char('a') if self.current_tab == SettingsTab::Mcp => {
+                // Add only works for exclude_dirs
+                let dirs_start = 2 + MCP_TOOLS.len() + MCP_RESOURCES.len();
+                if self.selected_item >= dirs_start || self.config.mcp.exclude_dirs.is_empty() {
+                    self.input_mode = InputMode::Editing;
+                    self.input_buffer.clear();
+                }
+            }
+            KeyCode::Char('d') if self.current_tab == SettingsTab::Mcp => {
+                let dirs_start = 2 + MCP_TOOLS.len() + MCP_RESOURCES.len();
+                if self.selected_item >= dirs_start && !self.config.mcp.exclude_dirs.is_empty() {
+                    let idx = self.selected_item - dirs_start;
+                    if idx < self.config.mcp.exclude_dirs.len() {
+                        let removed = self.config.mcp.exclude_dirs.remove(idx);
+                        self.dirty = true;
+                        self.save_status = Some(format!("Removed: {removed}"));
+                        if self.selected_item > dirs_start
+                            && self.selected_item >= dirs_start + self.config.mcp.exclude_dirs.len()
+                        {
+                            self.selected_item = self.selected_item.saturating_sub(1);
+                        }
+                    }
+                }
+            }
             KeyCode::Char('a') if self.current_tab == SettingsTab::Agents => {
                 self.input_mode = InputMode::Editing;
                 self.agent_name_input.clear();
@@ -383,6 +442,51 @@ impl AppState {
                         self.input_mode = InputMode::Editing;
                         self.input_buffer = self.config.search.page_limit.to_string();
                     }
+                    (SettingsTab::Mcp, 0) => {
+                        self.input_mode = InputMode::Editing;
+                        self.input_buffer = self.config.mcp.default_days.to_string();
+                    }
+                    (SettingsTab::Mcp, 1) => {
+                        self.input_mode = InputMode::Editing;
+                        self.input_buffer = self.config.mcp.default_limit.to_string();
+                    }
+                    (SettingsTab::Mcp, idx) if idx >= 2 && idx < 2 + MCP_TOOLS.len() => {
+                        let tool = MCP_TOOLS[idx - 2].to_string();
+                        if let Some(pos) = self
+                            .config
+                            .mcp
+                            .disabled_tools
+                            .iter()
+                            .position(|d| d == &tool)
+                        {
+                            self.config.mcp.disabled_tools.remove(pos);
+                            self.save_status = Some(format!("Enabled: {tool}"));
+                        } else {
+                            self.config.mcp.disabled_tools.push(tool.clone());
+                            self.save_status = Some(format!("Disabled: {tool}"));
+                        }
+                        self.dirty = true;
+                    }
+                    (SettingsTab::Mcp, idx)
+                        if idx >= 2 + MCP_TOOLS.len()
+                            && idx < 2 + MCP_TOOLS.len() + MCP_RESOURCES.len() =>
+                    {
+                        let res = MCP_RESOURCES[idx - 2 - MCP_TOOLS.len()].to_string();
+                        if let Some(pos) = self
+                            .config
+                            .mcp
+                            .disabled_resources
+                            .iter()
+                            .position(|d| d == &res)
+                        {
+                            self.config.mcp.disabled_resources.remove(pos);
+                            self.save_status = Some(format!("Enabled: {res}"));
+                        } else {
+                            self.config.mcp.disabled_resources.push(res.clone());
+                            self.save_status = Some(format!("Disabled: {res}"));
+                        }
+                        self.dirty = true;
+                    }
                     _ => self.toggle_bool(),
                 }
             }
@@ -450,6 +554,36 @@ impl AppState {
                             self.save_status = Some("Both Path and Tag are required".to_string());
                         }
                     }
+                } else if self.current_tab == SettingsTab::Mcp && self.selected_item == 0 {
+                    if let Ok(n) = self.input_buffer.parse::<u32>() {
+                        self.config.mcp.default_days = n.clamp(1, 365);
+                        self.dirty = true;
+                        self.save_status = Some(format!(
+                            "MCP default days set to {}",
+                            self.config.mcp.default_days
+                        ));
+                    } else {
+                        self.save_status = Some("Invalid number".to_string());
+                    }
+                    self.input_mode = InputMode::Normal;
+                } else if self.current_tab == SettingsTab::Mcp && self.selected_item == 1 {
+                    if let Ok(n) = self.input_buffer.parse::<u32>() {
+                        self.config.mcp.default_limit = n.clamp(1, 500);
+                        self.dirty = true;
+                        self.save_status = Some(format!(
+                            "MCP default limit set to {}",
+                            self.config.mcp.default_limit
+                        ));
+                    } else {
+                        self.save_status = Some("Invalid number".to_string());
+                    }
+                    self.input_mode = InputMode::Normal;
+                } else if self.current_tab == SettingsTab::Mcp && !self.input_buffer.is_empty() {
+                    let val = self.input_buffer.trim().to_string();
+                    self.config.mcp.exclude_dirs.push(val.clone());
+                    self.dirty = true;
+                    self.save_status = Some(format!("Excluded dir: {val}"));
+                    self.input_mode = InputMode::Normal;
                 } else if self.current_tab == SettingsTab::Agents {
                     // Agent triple-field form
                     if self.agent_focus == 0 {
@@ -771,6 +905,7 @@ fn render_content_panel(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) 
         SettingsTab::Exclusions => render_exclusions_tab(f, app, content_chunks[0]),
         SettingsTab::AutoTags => render_auto_tags_tab(f, app, content_chunks[0]),
         SettingsTab::Agents => render_agents_tab(f, app, content_chunks[0]),
+        SettingsTab::Mcp => render_mcp_tab(f, app, content_chunks[0]),
     }
 
     // Render description pane
@@ -800,6 +935,11 @@ const fn get_setting_description(tab: usize, item: usize) -> &'static str {
         (1, 1) => "Show risk assessment badges in the search detail pane for agent commands",
         (1, 2) => "Color theme: dark (RGB for dark terminals), light (RGB for light terminals), terminal (ANSI 16 — adapts to your scheme). Changes apply immediately.",
         (4, _) => "Custom agent detection rules. When an env var is set, suvadu tags commands with that agent name and type. Custom agents are checked before built-in agents. Restart your shell (source ~/.zshrc) after adding or removing agents.",
+        (5, 0) => "Default time window in days for MCP tools (1-365). Agents use this when they don't specify a date range.",
+        (5, 1) => "Default result limit for MCP tools (1-500). Agents use this when they don't specify a limit.",
+        (5, n) if n >= 2 && n < 2 + MCP_TOOLS.len() => "Toggle with Enter/Space. Unchecked tools won't appear in the MCP tools list. Agents won't be able to call disabled tools.",
+        (5, n) if n >= 2 + MCP_TOOLS.len() && n < 2 + MCP_TOOLS.len() + MCP_RESOURCES.len() => "Toggle with Enter/Space. Unchecked resources won't be auto-injected into agent context.",
+        (5, _) => "Directories to exclude from MCP queries. Commands in these dirs won't be returned to agents. [a] add, [d] delete.",
         _ => "Use [a] to add new items, [d] to delete selected items",
     }
 }
@@ -1147,6 +1287,164 @@ fn render_agents_tab(f: &mut ratatui::Frame, app: &mut AppState, area: Rect) {
     }
 }
 
+fn mcp_section_header(label: &str) -> ListItem<'static> {
+    let t = theme();
+    ListItem::new(Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            format!("── {label} ──"),
+            Style::default().fg(t.primary).add_modifier(Modifier::BOLD),
+        ),
+    ]))
+}
+
+fn build_mcp_items(
+    mcp: &crate::config::McpConfig,
+    selected: usize,
+) -> (Vec<ListItem<'static>>, Vec<Option<usize>>) {
+    let t = theme();
+    let mut items: Vec<ListItem> = Vec::new();
+    // Track which visual rows map to selectable items
+    // Non-selectable header rows are skipped during navigation
+    let mut row_map: Vec<Option<usize>> = Vec::new();
+
+    // Defaults section
+    items.push(mcp_section_header("Defaults"));
+    row_map.push(None);
+
+    items.push(setting_item(
+        "Default Days",
+        &mcp.default_days.to_string(),
+        selected == 0,
+        true,
+    ));
+    row_map.push(Some(0));
+
+    items.push(setting_item(
+        "Default Limit",
+        &mcp.default_limit.to_string(),
+        selected == 1,
+        true,
+    ));
+    row_map.push(Some(1));
+
+    // Tools section
+    let tools_disabled = mcp.disabled_tools.len();
+    let tools_label = if tools_disabled > 0 {
+        format!("Tools ({tools_disabled} disabled)")
+    } else {
+        "Tools (Enter to toggle)".to_string()
+    };
+    items.push(ListItem::new(""));
+    row_map.push(None);
+    items.push(mcp_section_header(&tools_label));
+    row_map.push(None);
+
+    for (i, tool) in MCP_TOOLS.iter().enumerate() {
+        let idx = 2 + i;
+        let enabled = !mcp.disabled_tools.iter().any(|d| d == tool);
+        items.push(setting_toggle(tool, enabled, selected == idx));
+        row_map.push(Some(idx));
+    }
+
+    // Resources section
+    let res_disabled = mcp.disabled_resources.len();
+    let res_label = if res_disabled > 0 {
+        format!("Resources ({res_disabled} disabled)")
+    } else {
+        "Resources (Enter to toggle)".to_string()
+    };
+    items.push(ListItem::new(""));
+    row_map.push(None);
+    items.push(mcp_section_header(&res_label));
+    row_map.push(None);
+
+    for (i, res) in MCP_RESOURCES.iter().enumerate() {
+        let idx = 2 + MCP_TOOLS.len() + i;
+        let enabled = !mcp.disabled_resources.iter().any(|d| d == res);
+        items.push(setting_toggle(res, enabled, selected == idx));
+        row_map.push(Some(idx));
+    }
+
+    // Exclude dirs section
+    items.push(ListItem::new(""));
+    row_map.push(None);
+    let dirs_label = if mcp.exclude_dirs.is_empty() {
+        "Exclude Dirs (press 'a' to add)".to_string()
+    } else {
+        format!(
+            "Exclude Dirs ({} dirs, 'a' add / 'd' delete)",
+            mcp.exclude_dirs.len()
+        )
+    };
+    items.push(mcp_section_header(&dirs_label));
+    row_map.push(None);
+
+    if mcp.exclude_dirs.is_empty() {
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            "    No directories excluded",
+            Style::default().fg(t.text_muted),
+        )])));
+        row_map.push(None);
+    } else {
+        for (i, dir) in mcp.exclude_dirs.iter().enumerate() {
+            let idx = 2 + MCP_TOOLS.len() + MCP_RESOURCES.len() + i;
+            let selected = selected == idx;
+            let arrow = if selected { " <<" } else { "" };
+            let text = Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("{dir}{arrow}"),
+                    Style::default().fg(if selected { t.text } else { t.text_secondary }),
+                ),
+            ]);
+            items.push(ListItem::new(text));
+            row_map.push(Some(idx));
+        }
+    }
+
+    (items, row_map)
+}
+
+fn render_mcp_tab(f: &mut ratatui::Frame, app: &AppState, area: Rect) {
+    let t = theme();
+    let mcp = &app.config.mcp;
+    let (items, row_map) = build_mcp_items(mcp, app.selected_item);
+
+    let disabled_count = mcp.disabled_tools.len() + mcp.disabled_resources.len();
+    let title = if disabled_count > 0 {
+        format!(" MCP Server ({disabled_count} disabled) ")
+    } else {
+        " MCP Server ".to_string()
+    };
+
+    let visual_row = row_map
+        .iter()
+        .position(|r| *r == Some(app.selected_item))
+        .unwrap_or(0);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(t.border))
+                .title(title),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(t.selection_bg)
+                .fg(t.selection_fg)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(visual_row));
+    let item_count = row_map.len();
+    f.render_stateful_widget(list, area, &mut list_state);
+    render_list_scrollbar(f, area, item_count, visual_row, t);
+}
+
 fn render_agent_popup(f: &mut ratatui::Frame, app: &AppState) {
     let t = theme();
     let area = centered_rect(60, 40, f.area());
@@ -1301,6 +1599,8 @@ mod tests {
         app.next_tab();
         assert_eq!(app.current_tab, SettingsTab::Agents);
         app.next_tab();
+        assert_eq!(app.current_tab, SettingsTab::Mcp);
+        app.next_tab();
         assert_eq!(app.current_tab, SettingsTab::Search); // Cycle back
 
         // Item navigation (Tab 0 has 5 items)
@@ -1388,6 +1688,8 @@ mod tests {
         let mut app = AppState::new(config);
 
         // From Search, prev_tab wraps to last tab
+        app.prev_tab();
+        assert_eq!(app.current_tab, SettingsTab::Mcp);
         app.prev_tab();
         assert_eq!(app.current_tab, SettingsTab::Agents);
 
@@ -2438,5 +2740,90 @@ mod tests {
         app.next_item();
         assert_eq!(app.selected_item, 0);
         assert_eq!(app.agent_list_state.selected(), Some(0));
+    }
+
+    // ── MCP tab tests ──────────────────────────────────────
+
+    #[test]
+    fn test_mcp_tab_toggle_tool() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Mcp;
+
+        // Item 2 = first tool (search_commands)
+        app.selected_item = 2;
+        assert!(app.config.mcp.disabled_tools.is_empty());
+
+        // Toggle off
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.config.mcp.disabled_tools.len(), 1);
+        assert_eq!(app.config.mcp.disabled_tools[0], "search_commands");
+        assert!(app.dirty);
+
+        // Toggle back on
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert!(app.config.mcp.disabled_tools.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_tab_toggle_resource() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Mcp;
+
+        // Item 2 + 15 tools = 17 = first resource (history/recent)
+        app.selected_item = 2 + MCP_TOOLS.len();
+        assert!(app.config.mcp.disabled_resources.is_empty());
+
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.config.mcp.disabled_resources.len(), 1);
+        assert_eq!(app.config.mcp.disabled_resources[0], "history/recent");
+
+        // Toggle back on
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert!(app.config.mcp.disabled_resources.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_tab_edit_default_days() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Mcp;
+        app.selected_item = 0;
+
+        // Enter edit mode
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.input_mode, InputMode::Editing);
+
+        // Type "14"
+        app.input_buffer = "14".to_string();
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.config.mcp.default_days, 14);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn test_mcp_tab_edit_default_limit() {
+        let config = Config::default();
+        let mut app = AppState::new(config);
+        app.current_tab = SettingsTab::Mcp;
+        app.selected_item = 1;
+
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.input_mode, InputMode::Editing);
+
+        app.input_buffer = "50".to_string();
+        app.handle_input(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.config.mcp.default_limit, 50);
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn test_mcp_tab_item_count() {
+        let config = Config::default();
+        let count = SettingsTab::Mcp.item_count(&config);
+        // 2 defaults + 15 tools + 7 resources + 0 exclude dirs
+        assert_eq!(count, 2 + MCP_TOOLS.len() + MCP_RESOURCES.len());
     }
 }

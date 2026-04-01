@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - **`suvadu://agents/sessions` resource** — auto-injected summary of the 5 most recent AI agent sessions with prompts and command counts. Agents get session awareness before the first tool call.
 - **`suvadu://context/project` resource** — auto-injected project briefing at session start. Includes common commands, failure rates for frequent commands, and recent agent activity. Every new agent session starts informed.
 
+- **MCP Configuration** — new `[mcp]` section in `config.toml` and a new MCP tab in `suv settings` TUI. Disable individual tools or resources with checkboxes, set default time windows (`default_days`) and result limits (`default_limit`), and exclude directories from MCP queries. Config is loaded at MCP server startup; disabled tools/resources are hidden from agents.
+
 ### Changed
 - **MCP server expanded** — 15 tools (was 11) and 7 auto-injected resources (was 5). New tools: `find_agent_session`, `replay_agent_session`, `learn_from_failures`, `project_context`. New resources: `suvadu://agents/sessions`, `suvadu://context/project`.
 
