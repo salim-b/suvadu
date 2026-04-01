@@ -29,6 +29,8 @@ pub fn list_tools(id: &Value) -> Value {
                 assess_risk_def(),
                 find_agent_session_def(),
                 replay_agent_session_def(),
+                learn_from_failures_def(),
+                project_context_def(),
             ]
         }
     })
@@ -50,6 +52,8 @@ pub fn call_tool(repo: &Repository, name: &str, args: &Value) -> Result<String, 
         "assess_risk" => handle_assess_risk(args),
         "find_agent_session" => handle_find_agent_session(repo, args),
         "replay_agent_session" => handle_replay_agent_session(repo, args),
+        "learn_from_failures" => handle_learn_from_failures(repo, args),
+        "project_context" => handle_project_context(repo, args),
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -257,6 +261,34 @@ fn replay_agent_session_def() -> Value {
                 "limit": { "type": "integer", "description": "Max commands to return (default: 100)", "default": 100 }
             },
             "required": ["session_id"]
+        }
+    })
+}
+
+fn learn_from_failures_def() -> Value {
+    json!({
+        "name": "learn_from_failures",
+        "description": "Analyze recurring command failures in a project. Shows commands with high failure rates, whether agents fail more than humans, and recent failure-to-fix patterns. Use this before starting work to avoid repeating known-bad approaches.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "description": "Directory to analyze (defaults to all)" },
+                "days": { "type": "integer", "description": "How many days back to look (default: 7)", "default": 7 }
+            }
+        }
+    })
+}
+
+fn project_context_def() -> Value {
+    json!({
+        "name": "project_context",
+        "description": "Get a project briefing: common commands, build/test/lint patterns, recent failures, failure rates, and agent activity. Use this to understand a project's workflow before making changes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "description": "Directory to analyze (defaults to all)" },
+                "days": { "type": "integer", "description": "Time window in days (default: 7)", "default": 7 }
+            }
         }
     })
 }
@@ -1464,6 +1496,244 @@ fn handle_replay_agent_session(repo: &Repository, args: &Value) -> Result<String
     Ok(out)
 }
 
+struct CmdFailStats {
+    total: usize,
+    fails: usize,
+    agent_total: usize,
+    agent_fails: usize,
+    last_fail_at: i64,
+}
+
+fn handle_learn_from_failures(repo: &Repository, args: &Value) -> Result<String, String> {
+    let days = get_int(args, "days", 7);
+    let directory = get_str(args, "directory");
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let after = now - days * 24 * 60 * 60 * 1000;
+
+    let qf = QueryFilter {
+        after: Some(after),
+        cwd: directory,
+        ..QueryFilter::default()
+    };
+
+    let entries = repo
+        .get_entries_filtered(5000, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    if entries.is_empty() {
+        return Ok(format!("No command history in the last {days} days."));
+    }
+
+    // Group by command and compute failure stats
+    let mut stats: std::collections::HashMap<&str, CmdFailStats> = std::collections::HashMap::new();
+    for e in &entries {
+        let entry = stats.entry(e.command.as_str()).or_insert(CmdFailStats {
+            total: 0,
+            fails: 0,
+            agent_total: 0,
+            agent_fails: 0,
+            last_fail_at: 0,
+        });
+        entry.total += 1;
+        let is_agent = e.executor_type.as_deref() == Some("agent");
+        if is_agent {
+            entry.agent_total += 1;
+        }
+        if e.exit_code.is_some_and(|c| c != 0) {
+            entry.fails += 1;
+            if is_agent {
+                entry.agent_fails += 1;
+            }
+            if e.started_at > entry.last_fail_at {
+                entry.last_fail_at = e.started_at;
+            }
+        }
+    }
+
+    // Filter to commands that fail frequently (3+ runs, 40%+ failure rate)
+    let mut problem_cmds: Vec<_> = stats
+        .into_iter()
+        .filter(|(_, s)| s.total >= 3 && s.fails * 100 / s.total >= 40)
+        .collect();
+
+    problem_cmds.sort_by(|a, b| {
+        let rate_a = a.1.fails * 100 / a.1.total;
+        let rate_b = b.1.fails * 100 / b.1.total;
+        rate_b.cmp(&rate_a).then(b.1.fails.cmp(&a.1.fails))
+    });
+
+    if problem_cmds.is_empty() {
+        return Ok(format!(
+            "No recurring failures in the last {days} days. All frequently-run commands have acceptable success rates."
+        ));
+    }
+
+    let mut out = format!(
+        "Recurring failures (last {days} days, {} problem commands):\n\n",
+        problem_cmds.len()
+    );
+
+    for (cmd, s) in problem_cmds.iter().take(10) {
+        let rate = s.fails * 100 / s.total;
+        let display = util::truncate_str(cmd, 60, "...");
+        let rel = format_relative_time(s.last_fail_at);
+        let _ = writeln!(
+            out,
+            "  {display}\n    Failed {}/{} runs ({rate}%) — last failure {rel}",
+            s.fails, s.total,
+        );
+        if s.agent_total > 0 && s.total > s.agent_total {
+            let agent_rate = if s.agent_total > 0 {
+                s.agent_fails * 100 / s.agent_total
+            } else {
+                0
+            };
+            let human_total = s.total - s.agent_total;
+            let human_fails = s.fails - s.agent_fails;
+            let human_rate = if human_total > 0 {
+                human_fails * 100 / human_total
+            } else {
+                0
+            };
+            let _ = writeln!(
+                out,
+                "    Agents: {agent_rate}% fail rate — Humans: {human_rate}% fail rate"
+            );
+        }
+        out.push('\n');
+    }
+
+    Ok(out)
+}
+
+fn is_build_test_lint(cmd: &str) -> bool {
+    cmd.starts_with("cargo test")
+        || cmd.starts_with("cargo build")
+        || cmd.starts_with("cargo clippy")
+        || cmd.starts_with("npm test")
+        || cmd.starts_with("npm run")
+        || cmd.starts_with("pytest")
+        || cmd.starts_with("go test")
+        || cmd.starts_with("make")
+}
+
+fn format_build_test_lint(entries: &[crate::models::Entry], out: &mut String) {
+    let btl: Vec<_> = entries
+        .iter()
+        .filter(|e| is_build_test_lint(&e.command))
+        .collect();
+    if btl.is_empty() {
+        return;
+    }
+    let mut counts: std::collections::HashMap<&str, (usize, usize)> =
+        std::collections::HashMap::new();
+    for e in &btl {
+        let entry = counts.entry(e.command.as_str()).or_insert((0, 0));
+        entry.0 += 1;
+        if e.exit_code == Some(0) {
+            entry.1 += 1;
+        }
+    }
+    let mut sorted: Vec<_> = counts.into_iter().collect();
+    sorted.sort_by(|a, b| (b.1).0.cmp(&(a.1).0));
+
+    let _ = writeln!(out, "  Build/test/lint commands:");
+    for (cmd, (total, success)) in sorted.iter().take(5) {
+        let rate = if *total > 0 { success * 100 / total } else { 0 };
+        let display = util::truncate_str(cmd, 50, "...");
+        let _ = writeln!(out, "    {display} — {total} runs, {rate}% success");
+    }
+    out.push('\n');
+}
+
+fn handle_project_context(repo: &Repository, args: &Value) -> Result<String, String> {
+    let days = get_int(args, "days", 7);
+    let directory = get_str(args, "directory");
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let after = now - days * 24 * 60 * 60 * 1000;
+    let day_ago = now - 24 * 60 * 60 * 1000;
+
+    let qf = QueryFilter {
+        after: Some(after),
+        cwd: directory,
+        ..QueryFilter::default()
+    };
+
+    let entries = repo
+        .get_entries_filtered(5000, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    if entries.is_empty() {
+        return Ok(format!("No command history in the last {days} days."));
+    }
+
+    let dir_label = directory.unwrap_or("all directories");
+    let mut out = format!(
+        "Project context for {dir_label} (last {days} days, {} commands):\n\n",
+        entries.len()
+    );
+
+    // Top commands by frequency
+    let mut cmd_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for e in &entries {
+        let program = e.command.split_whitespace().next().unwrap_or(&e.command);
+        *cmd_counts.entry(program).or_default() += 1;
+    }
+    let mut top_cmds: Vec<_> = cmd_counts.into_iter().collect();
+    top_cmds.sort_by(|a, b| b.1.cmp(&a.1));
+    top_cmds.truncate(10);
+
+    let _ = writeln!(out, "  Common commands:");
+    for (cmd, count) in &top_cmds {
+        let _ = writeln!(out, "    {count:>4}x  {cmd}");
+    }
+    out.push('\n');
+
+    format_build_test_lint(&entries, &mut out);
+
+    // Recent failures (last 24h)
+    let recent_failures: Vec<_> = entries
+        .iter()
+        .filter(|e| e.started_at >= day_ago && e.exit_code.is_some_and(|c| c != 0))
+        .collect();
+    if !recent_failures.is_empty() {
+        let _ = writeln!(out, "  Recent failures (last 24h):");
+        for e in recent_failures.iter().take(5) {
+            let code = e.exit_code.unwrap_or(-1);
+            let display = util::truncate_str(&e.command, 50, "...");
+            let rel = format_relative_time(e.started_at);
+            let _ = writeln!(out, "    exit {code} | {display} — {rel}");
+        }
+        out.push('\n');
+    }
+
+    // Agent activity
+    let agent_sessions = build_session_groups(&entries);
+    if !agent_sessions.is_empty() {
+        let _ = writeln!(
+            out,
+            "  Agent sessions ({} this week):",
+            agent_sessions.len()
+        );
+        for s in agent_sessions.iter().take(3) {
+            let rel = format_relative_time(s.last_command_at);
+            let _ = writeln!(
+                out,
+                "    {} ({}, {}) — {} cmds, {} failed",
+                s.session_id, s.executor, rel, s.command_count, s.failure_count,
+            );
+            if !s.first_prompt.is_empty() {
+                let display = util::truncate_str(&s.first_prompt, 60, "...");
+                let _ = writeln!(out, "      \"{display}\"");
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1472,7 +1742,7 @@ mod tests {
     fn test_list_tools_count() {
         let resp = list_tools(&json!(1));
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), 15);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"search_commands"));
@@ -1488,6 +1758,8 @@ mod tests {
         assert!(names.contains(&"assess_risk"));
         assert!(names.contains(&"find_agent_session"));
         assert!(names.contains(&"replay_agent_session"));
+        assert!(names.contains(&"learn_from_failures"));
+        assert!(names.contains(&"project_context"));
     }
 
     #[test]
@@ -2260,5 +2532,141 @@ mod tests {
         let (_dir, repo) = crate::test_utils::test_repo();
         let result = call_tool(&repo, "replay_agent_session", &json!({}));
         assert!(result.is_err());
+    }
+
+    // ── learn_from_failures tests ───────────────────────────
+
+    #[test]
+    fn test_learn_from_failures_empty_db() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "learn_from_failures", &json!({}));
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("No command history"));
+    }
+
+    #[test]
+    fn test_learn_from_failures_detects_recurring() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+
+        // Add more failures for "npm test" to trigger the 40% threshold
+        let now = chrono::Utc::now().timestamp_millis();
+        let session = &crate::models::Session {
+            id: "claude-fail1".into(),
+            hostname: "test".into(),
+            created_at: now - 100_000,
+            tag_id: None,
+        };
+        repo.insert_session(session).unwrap();
+
+        for i in 0..5 {
+            let mut e = crate::models::Entry::new(
+                "claude-fail1".into(),
+                "npm test".into(),
+                "/project".into(),
+                Some(1), // all fail
+                now - (i * 10_000) - 50_000,
+                now - (i * 10_000) - 49_000,
+            );
+            e.executor_type = Some("agent".into());
+            e.executor = Some("claude-code".into());
+            repo.insert_entry(&e).unwrap();
+        }
+
+        let result = call_tool(&repo, "learn_from_failures", &json!({}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("npm test"),
+            "should detect npm test as recurring failure: {text}"
+        );
+        assert!(
+            text.contains("5/5") || text.contains("100%"),
+            "should show failure rate: {text}"
+        );
+    }
+
+    #[test]
+    fn test_learn_from_failures_no_problems() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let now = chrono::Utc::now().timestamp_millis();
+
+        let session = crate::models::Session {
+            id: "s1".into(),
+            hostname: "test".into(),
+            created_at: now - 100_000,
+            tag_id: None,
+        };
+        repo.insert_session(&session).unwrap();
+
+        // All successful commands
+        for i in 0..5 {
+            let e = crate::models::Entry::new(
+                "s1".into(),
+                "git status".into(),
+                "/project".into(),
+                Some(0),
+                now - (i * 10_000) - 50_000,
+                now - (i * 10_000) - 49_000,
+            );
+            repo.insert_entry(&e).unwrap();
+        }
+
+        let result = call_tool(&repo, "learn_from_failures", &json!({}));
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().contains("No recurring failures"),
+            "should report no problems"
+        );
+    }
+
+    // ── project_context tests ───────────────────────────────
+
+    #[test]
+    fn test_project_context_empty_db() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "project_context", &json!({}));
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("No command history"));
+    }
+
+    #[test]
+    fn test_project_context_with_data() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+
+        let result = call_tool(&repo, "project_context", &json!({}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("Common commands"),
+            "should show common commands: {text}"
+        );
+        assert!(
+            text.contains("Agent sessions"),
+            "should show agent sessions: {text}"
+        );
+    }
+
+    #[test]
+    fn test_project_context_filter_by_directory() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+
+        let result = call_tool(
+            &repo,
+            "project_context",
+            &json!({"directory": "/other-project"}),
+        );
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("git status") || text.contains("git add"),
+            "should show cursor commands from /other-project: {text}"
+        );
+        assert!(
+            !text.contains("grep"),
+            "should NOT show claude commands from /project: {text}"
+        );
     }
 }

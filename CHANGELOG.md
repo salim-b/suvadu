@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-04-01
+
+### Added
+- **Agent Session Discovery** — `find_agent_session` MCP tool searches past AI agent sessions by prompt text, directory, executor, or date range. Returns session summaries with command counts, success rates, risk breakdown, and `claude --resume` commands.
+- **Session Replay** — `replay_agent_session` MCP tool returns the full chronological timeline of a specific agent session with prompts interleaved between commands. Supports session ID prefix normalization (passing `abc123` finds `claude-abc123`).
+- **Learn from Failures** — `learn_from_failures` MCP tool analyzes recurring command failures in a project. Shows commands with high failure rates, agent vs human failure comparison, and last failure timestamps. Helps agents avoid repeating known-bad approaches.
+- **Project Context** — `project_context` MCP tool returns a project briefing: common commands, build/test/lint patterns with success rates, recent failures, and agent activity. Available on-demand with directory and time range filters.
+- **`suvadu://agents/sessions` resource** — auto-injected summary of the 5 most recent AI agent sessions with prompts and command counts. Agents get session awareness before the first tool call.
+- **`suvadu://context/project` resource** — auto-injected project briefing at session start. Includes common commands, failure rates for frequent commands, and recent agent activity. Every new agent session starts informed.
+
+### Changed
+- **MCP server expanded** — 15 tools (was 11) and 7 auto-injected resources (was 5). New tools: `find_agent_session`, `replay_agent_session`, `learn_from_failures`, `project_context`. New resources: `suvadu://agents/sessions`, `suvadu://context/project`.
+
 ## [0.2.1] - 2026-03-30
 
 ### Added
