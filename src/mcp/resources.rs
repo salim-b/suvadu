@@ -46,6 +46,12 @@ pub fn list_resources(id: &Value) -> Value {
                     "name": "Agent Activity",
                     "description": "Overview of AI agent activity: which agents, how many commands, success rates",
                     "mimeType": "text/plain"
+                },
+                {
+                    "uri": "suvadu://agents/sessions",
+                    "name": "Recent Agent Sessions",
+                    "description": "Summary of the 5 most recent AI agent sessions, with prompts and command counts",
+                    "mimeType": "text/plain"
                 }
             ]
         }
@@ -80,6 +86,7 @@ pub fn read_resource(repo: &Repository, uri: &str) -> Result<Value, String> {
         "suvadu://stats/today" => read_today_stats(repo)?,
         "suvadu://risk/summary" => read_risk_summary(repo)?,
         "suvadu://agents/activity" => read_agent_activity(repo)?,
+        "suvadu://agents/sessions" => read_agent_sessions(repo)?,
         _ if uri.starts_with("suvadu://history/session/") => {
             let session_id = uri.strip_prefix("suvadu://history/session/").unwrap_or("");
             read_session_history(repo, session_id)?
@@ -383,6 +390,122 @@ fn read_agent_activity(repo: &Repository) -> Result<String, String> {
     Ok(out)
 }
 
+fn relative_time(now: i64, ms: i64) -> String {
+    let diff = now - ms;
+    let hours = diff / 3_600_000;
+    let days = hours / 24;
+    if days > 0 {
+        format!("{days} day{} ago", if days == 1 { "" } else { "s" })
+    } else if hours > 0 {
+        format!("{hours} hour{} ago", if hours == 1 { "" } else { "s" })
+    } else {
+        "just now".to_string()
+    }
+}
+
+fn read_agent_sessions(repo: &Repository) -> Result<String, String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let week_ago = now - 7 * 24 * 60 * 60 * 1000;
+
+    let qf = QueryFilter {
+        after: Some(week_ago),
+        before: None,
+        tag_id: None,
+        exit_code: None,
+        query: None,
+        prefix_match: false,
+        executor: None,
+        cwd: None,
+        field: SearchField::Command,
+    };
+
+    let entries = repo
+        .get_entries_filtered(5000, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    let sessions = group_agent_sessions(&entries);
+    if sessions.is_empty() {
+        return Ok("No agent sessions in the last 7 days.".to_string());
+    }
+
+    let mut out = String::new();
+    let _ = writeln!(out, "Recent agent sessions (last 7 days):\n");
+    for (i, (sid, executor, count, success, failure, last_at, prompt)) in
+        sessions.iter().take(5).enumerate()
+    {
+        let rel = relative_time(now, *last_at);
+        let status = if *failure == 0 {
+            "all ok".to_string()
+        } else {
+            format!("{success} ok, {failure} failed")
+        };
+        let _ = writeln!(out, "{}. {sid} ({executor}, {rel})", i + 1);
+        let _ = writeln!(out, "   {count} commands ({status})");
+        if !prompt.is_empty() {
+            let display = util::truncate_str(prompt, 80, "...");
+            let _ = writeln!(out, "   \"{display}\"");
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// Group agent entries by `session_id`, sorted by most recent.
+fn group_agent_sessions(
+    entries: &[crate::models::Entry],
+) -> Vec<(&str, &str, usize, usize, usize, i64, String)> {
+    let mut groups: std::collections::HashMap<&str, Vec<&crate::models::Entry>> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        if entry.executor_type.as_deref() != Some("agent") {
+            continue;
+        }
+        groups
+            .entry(entry.session_id.as_str())
+            .or_default()
+            .push(entry);
+    }
+
+    let mut sessions: Vec<_> = groups
+        .into_iter()
+        .map(|(session_id, cmds)| {
+            let count = cmds.len();
+            let success = cmds.iter().filter(|e| e.exit_code == Some(0)).count();
+            let failure = cmds
+                .iter()
+                .filter(|e| e.exit_code.is_some_and(|c| c != 0))
+                .count();
+            let executor = cmds
+                .first()
+                .and_then(|e| e.executor.as_deref())
+                .unwrap_or("unknown");
+            let last_at = cmds.iter().map(|e| e.started_at).max().unwrap_or(0);
+            let first_prompt = cmds
+                .iter()
+                .find_map(|e| {
+                    e.context
+                        .as_ref()
+                        .and_then(|ctx| ctx.get("agent_prompt"))
+                        .filter(|p| !p.is_empty())
+                })
+                .cloned()
+                .unwrap_or_default();
+            (
+                session_id,
+                executor,
+                count,
+                success,
+                failure,
+                last_at,
+                first_prompt,
+            )
+        })
+        .collect();
+
+    sessions.sort_by(|a, b| b.5.cmp(&a.5));
+    sessions
+}
+
 fn read_session_history(repo: &Repository, session_id: &str) -> Result<String, String> {
     if session_id.is_empty() {
         return Err("session_id is required".to_string());
@@ -429,10 +552,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_list_resources_has_five() {
+    fn test_list_resources_has_six() {
         let resp = list_resources(&json!(1));
         let resources = resp["result"]["resources"].as_array().unwrap();
-        assert_eq!(resources.len(), 5);
+        assert_eq!(resources.len(), 6);
         for r in resources {
             assert!(r["uri"].is_string());
             assert!(r["name"].is_string());
@@ -501,6 +624,61 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("No AI agent activity"));
+    }
+
+    #[test]
+    fn test_read_agent_sessions_empty() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = read_resource(&repo, "suvadu://agents/sessions");
+        assert!(result.is_ok());
+        assert!(result.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("No agent sessions"));
+    }
+
+    #[test]
+    fn test_read_agent_sessions_with_data() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+
+        let session = crate::models::Session {
+            id: "claude-test1".into(),
+            hostname: "test".into(),
+            created_at: chrono::Utc::now().timestamp_millis() - 3_600_000,
+            tag_id: None,
+        };
+        repo.insert_session(&session).unwrap();
+
+        let mut entry = crate::models::Entry::new(
+            "claude-test1".into(),
+            "cargo test".into(),
+            "/project".into(),
+            Some(0),
+            chrono::Utc::now().timestamp_millis() - 3_600_000,
+            chrono::Utc::now().timestamp_millis() - 3_599_000,
+        );
+        let mut ctx = std::collections::HashMap::new();
+        ctx.insert("agent_prompt".into(), "run tests".into());
+        entry.context = Some(ctx);
+        entry.executor_type = Some("agent".into());
+        entry.executor = Some("claude-code".into());
+        repo.insert_entry(&entry).unwrap();
+
+        let result = read_resource(&repo, "suvadu://agents/sessions");
+        assert!(result.is_ok());
+        let text = result.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            text.contains("claude-test1"),
+            "should contain session id: {text}"
+        );
+        assert!(
+            text.contains("claude-code"),
+            "should contain executor: {text}"
+        );
+        assert!(text.contains("run tests"), "should contain prompt: {text}");
     }
 
     #[test]

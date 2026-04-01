@@ -27,6 +27,8 @@ pub fn list_tools(id: &Value) -> Value {
                 what_failed_def(),
                 suggest_next_def(),
                 assess_risk_def(),
+                find_agent_session_def(),
+                replay_agent_session_def(),
             ]
         }
     })
@@ -46,6 +48,8 @@ pub fn call_tool(repo: &Repository, name: &str, args: &Value) -> Result<String, 
         "what_failed" => handle_what_failed(repo, args),
         "suggest_next" => handle_suggest_next(repo, args),
         "assess_risk" => handle_assess_risk(args),
+        "find_agent_session" => handle_find_agent_session(repo, args),
+        "replay_agent_session" => handle_replay_agent_session(repo, args),
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -220,6 +224,39 @@ fn assess_risk_def() -> Value {
                     "description": "Multiple commands to assess at once"
                 }
             }
+        }
+    })
+}
+
+fn find_agent_session_def() -> Value {
+    json!({
+        "name": "find_agent_session",
+        "description": "Search past AI agent sessions. Find sessions by prompt text, directory, executor, or date range. Returns session summaries with command counts, success rates, and the first prompt. Use this to discover what previous agent sessions did in a project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "description": "Filter to sessions that ran commands in this directory" },
+                "executor": { "type": "string", "description": "Filter by agent name (e.g. claude-code, cursor)" },
+                "prompt_text": { "type": "string", "description": "Search across prompts in sessions (substring match)" },
+                "after": { "type": "string", "description": "Only sessions after this date (ISO 8601 or relative like '3 days ago')" },
+                "before": { "type": "string", "description": "Only sessions before this date" },
+                "limit": { "type": "integer", "description": "Max sessions to return (default: 10)", "default": 10 }
+            }
+        }
+    })
+}
+
+fn replay_agent_session_def() -> Value {
+    json!({
+        "name": "replay_agent_session",
+        "description": "Get the full chronological timeline of a specific agent session: every prompt and command with exit codes, directories, and timestamps. Use this to understand exactly what a past agent session did.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": { "type": "string", "description": "The session ID to replay (with or without claude-/cursor- prefix)" },
+                "limit": { "type": "integer", "description": "Max commands to return (default: 100)", "default": 100 }
+            },
+            "required": ["session_id"]
         }
     })
 }
@@ -1054,6 +1091,379 @@ fn handle_assess_risk(args: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+// ── Agent session tools ─────────────────────────────────────
+
+struct AgentSessionSummary {
+    session_id: String,
+    executor: String,
+    first_prompt: String,
+    command_count: usize,
+    success_count: usize,
+    failure_count: usize,
+    directories: Vec<String>,
+    first_command_at: i64,
+    last_command_at: i64,
+    risk_summary: String,
+}
+
+/// Group agent entries by `session_id` and compute per-session summaries.
+fn build_session_groups(entries: &[crate::models::Entry]) -> Vec<AgentSessionSummary> {
+    use crate::risk;
+    use std::collections::{HashMap, HashSet};
+
+    let mut groups: HashMap<&str, Vec<&crate::models::Entry>> = HashMap::new();
+    for entry in entries {
+        if entry.executor_type.as_deref() != Some("agent") {
+            continue;
+        }
+        groups
+            .entry(entry.session_id.as_str())
+            .or_default()
+            .push(entry);
+    }
+    // Sort each group chronologically so first_prompt is the earliest
+    for cmds in groups.values_mut() {
+        cmds.sort_by_key(|e| e.started_at);
+    }
+
+    let mut sessions: Vec<AgentSessionSummary> = groups
+        .into_iter()
+        .map(|(session_id, cmds)| {
+            let command_count = cmds.len();
+            let success_count = cmds.iter().filter(|e| e.exit_code == Some(0)).count();
+            let failure_count = cmds
+                .iter()
+                .filter(|e| e.exit_code.is_some_and(|c| c != 0))
+                .count();
+
+            let mut dirs = HashSet::new();
+            for e in &cmds {
+                dirs.insert(e.cwd.as_str());
+            }
+            let mut directories: Vec<String> = dirs.into_iter().map(String::from).collect();
+            directories.sort();
+            directories.truncate(3);
+
+            let first_prompt = cmds
+                .iter()
+                .find_map(|e| {
+                    e.context
+                        .as_ref()
+                        .and_then(|ctx| ctx.get("agent_prompt"))
+                        .filter(|p| !p.is_empty())
+                })
+                .cloned()
+                .unwrap_or_default();
+
+            let executor = cmds
+                .first()
+                .and_then(|e| e.executor.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let first_command_at = cmds.iter().map(|e| e.started_at).min().unwrap_or(0);
+            let last_command_at = cmds.iter().map(|e| e.started_at).max().unwrap_or(0);
+
+            let risk_data = risk::session_risk(&cmds.iter().copied().cloned().collect::<Vec<_>>());
+            let mut risk_parts = Vec::new();
+            if risk_data.critical_count > 0 {
+                risk_parts.push(format!("{} critical", risk_data.critical_count));
+            }
+            if risk_data.high_count > 0 {
+                risk_parts.push(format!("{} high", risk_data.high_count));
+            }
+            if risk_data.medium_count > 0 {
+                risk_parts.push(format!("{} medium", risk_data.medium_count));
+            }
+            let safe = risk_data.safe_count + risk_data.low_count;
+            if safe > 0 {
+                risk_parts.push(format!("{safe} safe"));
+            }
+            let risk_summary = if risk_parts.is_empty() {
+                "all safe".to_string()
+            } else {
+                risk_parts.join(", ")
+            };
+
+            AgentSessionSummary {
+                session_id: session_id.to_string(),
+                executor,
+                first_prompt,
+                command_count,
+                success_count,
+                failure_count,
+                directories,
+                first_command_at,
+                last_command_at,
+                risk_summary,
+            }
+        })
+        .collect();
+
+    sessions.sort_by(|a, b| b.last_command_at.cmp(&a.last_command_at));
+    sessions
+}
+
+/// Extract the resume ID by stripping the agent prefix from a session ID.
+fn resume_id(session_id: &str) -> &str {
+    session_id
+        .strip_prefix("claude-")
+        .or_else(|| session_id.strip_prefix("cursor-"))
+        .or_else(|| session_id.strip_prefix("opencode-"))
+        .unwrap_or(session_id)
+}
+
+/// Format a relative time description like "3 hours ago" from millisecond timestamps.
+fn format_relative_time(ms: i64) -> String {
+    let now = chrono::Utc::now().timestamp_millis();
+    let diff = now - ms;
+    if diff < 0 {
+        return "just now".to_string();
+    }
+    let minutes = diff / 60_000;
+    let hours = minutes / 60;
+    let days = hours / 24;
+    if days > 0 {
+        format!("{days} day{} ago", if days == 1 { "" } else { "s" })
+    } else if hours > 0 {
+        format!("{hours} hour{} ago", if hours == 1 { "" } else { "s" })
+    } else if minutes > 0 {
+        format!(
+            "{minutes} minute{} ago",
+            if minutes == 1 { "" } else { "s" }
+        )
+    } else {
+        "just now".to_string()
+    }
+}
+
+fn handle_find_agent_session(repo: &Repository, args: &Value) -> Result<String, String> {
+    let limit = usize::try_from(get_int(args, "limit", 10)).unwrap_or(10);
+    let directory = get_str(args, "directory");
+    let executor = get_str(args, "executor");
+    let prompt_text = get_str(args, "prompt_text");
+    let after = get_str(args, "after").and_then(|s| util::parse_date_input(s, false));
+    let before = get_str(args, "before").and_then(|s| util::parse_date_input(s, true));
+
+    let qf = QueryFilter {
+        after,
+        before,
+        tag_id: None,
+        exit_code: None,
+        query: None,
+        prefix_match: false,
+        executor,
+        cwd: directory,
+        field: crate::models::SearchField::Command,
+    };
+
+    let entries = repo
+        .get_entries_filtered(5000, 0, &qf)
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    let mut sessions = build_session_groups(&entries);
+
+    // Filter by prompt text if specified
+    if let Some(search) = prompt_text {
+        let lower = search.to_lowercase();
+        sessions.retain(|s| s.first_prompt.to_lowercase().contains(&lower));
+    }
+
+    sessions.truncate(limit);
+
+    if sessions.is_empty() {
+        return Ok("No agent sessions found.".to_string());
+    }
+
+    let mut out = format!(
+        "{} agent session{}:\n\n",
+        sessions.len(),
+        if sessions.len() == 1 { "" } else { "s" }
+    );
+    for (i, s) in sessions.iter().enumerate() {
+        let rel = format_relative_time(s.last_command_at);
+        let duration_mins = (s.last_command_at - s.first_command_at) / 60_000;
+        let dur_str = if duration_mins < 1 {
+            "< 1 min".to_string()
+        } else {
+            format!("{duration_mins} min")
+        };
+        let _ = writeln!(out, "{}. {} ({})", i + 1, s.session_id, s.executor);
+        let _ = writeln!(
+            out,
+            "   {} | {} | {} commands | {} ok, {} failed",
+            rel, dur_str, s.command_count, s.success_count, s.failure_count,
+        );
+        if !s.directories.is_empty() {
+            let _ = writeln!(out, "   Directories: {}", s.directories.join(", "));
+        }
+        if !s.first_prompt.is_empty() {
+            let prompt_display = if s.first_prompt.len() > 80 {
+                format!("{}...", &s.first_prompt[..77])
+            } else {
+                s.first_prompt.clone()
+            };
+            let _ = writeln!(out, "   First prompt: \"{prompt_display}\"");
+        }
+        let _ = writeln!(out, "   Risk: {}", s.risk_summary);
+
+        let rid = resume_id(&s.session_id);
+        if s.session_id.starts_with("claude-") {
+            let _ = writeln!(out, "   Resume: claude --resume {rid}");
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_lines)]
+fn handle_replay_agent_session(repo: &Repository, args: &Value) -> Result<String, String> {
+    let raw_id = get_str(args, "session_id").ok_or("session_id is required")?;
+    let limit = usize::try_from(get_int(args, "limit", 100)).unwrap_or(100);
+
+    // Normalize: try as-is, then with prefixes
+    let session_id = {
+        let filter = crate::repository::ReplayFilter {
+            limit: Some(1),
+            ..Default::default()
+        };
+        let try_ids = [
+            raw_id.to_string(),
+            format!("claude-{raw_id}"),
+            format!("cursor-{raw_id}"),
+        ];
+        let mut found = None;
+        for candidate in &try_ids {
+            let entries = repo
+                .get_replay_entries(Some(candidate), &filter)
+                .unwrap_or_default();
+            if !entries.is_empty() {
+                found = Some(candidate.clone());
+                break;
+            }
+        }
+        found.ok_or_else(|| format!("No session found for '{raw_id}'"))?
+    };
+
+    let entries = repo
+        .get_replay_entries(
+            Some(&session_id),
+            &crate::repository::ReplayFilter {
+                limit: Some(limit),
+                ..Default::default()
+            },
+        )
+        .map_err(|e| format!("query failed: {e}"))?;
+
+    if entries.is_empty() {
+        return Err(format!("No commands found for session '{session_id}'"));
+    }
+
+    let executor = entries
+        .first()
+        .and_then(|e| e.executor.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let total = entries.len();
+    let success = entries.iter().filter(|e| e.exit_code == Some(0)).count();
+    let rate = if total > 0 { success * 100 / total } else { 0 };
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Session {session_id} ({executor}) — {total} commands, {rate}% success\n",
+    );
+    let _ = writeln!(out, "Timeline:\n");
+
+    let mut last_prompt = String::new();
+    for entry in &entries {
+        // Show prompt if it changed
+        let prompt = entry
+            .context
+            .as_ref()
+            .and_then(|ctx| ctx.get("agent_prompt"))
+            .cloned()
+            .unwrap_or_default();
+        if !prompt.is_empty() && prompt != last_prompt {
+            let _ = writeln!(out, "  [PROMPT] \"{prompt}\"");
+            let _ = writeln!(out, "           {}\n", format_time(entry.started_at));
+            last_prompt = prompt;
+        }
+
+        let exit = match entry.exit_code {
+            Some(0) => "ok".to_string(),
+            Some(c) => format!("exit {c}"),
+            None => "?".to_string(),
+        };
+        let dur = util::format_duration_ms(entry.duration_ms);
+        let _ = writeln!(out, "  [{exit:<7}] {}", entry.command,);
+        let _ = writeln!(
+            out,
+            "           {} | {} | {}\n",
+            entry.cwd,
+            dur,
+            format_time(entry.started_at),
+        );
+    }
+
+    // Summary
+    let failure = entries
+        .iter()
+        .filter(|e| e.exit_code.is_some_and(|c| c != 0))
+        .count();
+    let mut dirs: Vec<String> = entries
+        .iter()
+        .map(|e| e.cwd.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    dirs.sort();
+
+    let risk_data = crate::risk::session_risk(&entries);
+    let mut risk_parts = Vec::new();
+    if risk_data.critical_count > 0 {
+        risk_parts.push(format!("{} critical", risk_data.critical_count));
+    }
+    if risk_data.high_count > 0 {
+        risk_parts.push(format!("{} high", risk_data.high_count));
+    }
+    if risk_data.medium_count > 0 {
+        risk_parts.push(format!("{} medium", risk_data.medium_count));
+    }
+    let safe = risk_data.safe_count + risk_data.low_count;
+    if safe > 0 {
+        risk_parts.push(format!("{safe} safe"));
+    }
+    let risk_str = if risk_parts.is_empty() {
+        "all safe".to_string()
+    } else {
+        risk_parts.join(", ")
+    };
+
+    let first_at = entries.iter().map(|e| e.started_at).min().unwrap_or(0);
+    let last_at = entries.iter().map(|e| e.ended_at).max().unwrap_or(0);
+    let duration_mins = (last_at - first_at) / 60_000;
+    let duration_str = if duration_mins < 1 {
+        "< 1 minute".to_string()
+    } else {
+        format!(
+            "{duration_mins} minute{}",
+            if duration_mins == 1 { "" } else { "s" }
+        )
+    };
+
+    let _ = writeln!(out, "Summary:");
+    let _ = writeln!(out, "  Commands: {total} ({success} ok, {failure} failed)");
+    let _ = writeln!(out, "  Duration: {duration_str}");
+    let _ = writeln!(out, "  Directories: {}", dirs.join(", "));
+    let _ = writeln!(out, "  Risk: {risk_str}");
+
+    let rid = resume_id(&session_id);
+    if session_id.starts_with("claude-") {
+        let _ = writeln!(out, "  Resume: claude --resume {rid}");
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1062,7 +1472,7 @@ mod tests {
     fn test_list_tools_count() {
         let resp = list_tools(&json!(1));
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 13);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"search_commands"));
@@ -1076,6 +1486,8 @@ mod tests {
         assert!(names.contains(&"what_failed"));
         assert!(names.contains(&"suggest_next"));
         assert!(names.contains(&"assess_risk"));
+        assert!(names.contains(&"find_agent_session"));
+        assert!(names.contains(&"replay_agent_session"));
     }
 
     #[test]
@@ -1553,5 +1965,300 @@ mod tests {
             text.contains("CRITICAL") || text.contains("HIGH"),
             "force push should be high/critical: {text}"
         );
+    }
+
+    // ── Agent session tool tests ────────────────────────────
+
+    fn seed_agent_sessions(repo: &Repository) {
+        use std::collections::HashMap;
+
+        let now = chrono::Utc::now().timestamp_millis();
+
+        // Session 1: claude-code, 3 commands, 1 failure
+        let s1 = crate::models::Session {
+            id: "claude-abc123".into(),
+            hostname: "test".into(),
+            created_at: now - 3_600_000,
+            tag_id: None,
+        };
+        repo.insert_session(&s1).unwrap();
+
+        let mut e1 = crate::models::Entry::new(
+            "claude-abc123".into(),
+            "grep -r 'auth' src/".into(),
+            "/project".into(),
+            Some(0),
+            now - 3_600_000,
+            now - 3_599_900,
+        );
+        let mut ctx1 = HashMap::new();
+        ctx1.insert("agent_prompt".into(), "refactor auth module".into());
+        e1.context = Some(ctx1);
+        e1.executor_type = Some("agent".into());
+        e1.executor = Some("claude-code".into());
+        repo.insert_entry(&e1).unwrap();
+
+        let mut e2 = crate::models::Entry::new(
+            "claude-abc123".into(),
+            "npm test".into(),
+            "/project".into(),
+            Some(1),
+            now - 3_590_000,
+            now - 3_580_000,
+        );
+        let mut ctx2 = HashMap::new();
+        ctx2.insert("agent_prompt".into(), "refactor auth module".into());
+        e2.context = Some(ctx2);
+        e2.executor_type = Some("agent".into());
+        e2.executor = Some("claude-code".into());
+        repo.insert_entry(&e2).unwrap();
+
+        let mut e3 = crate::models::Entry::new(
+            "claude-abc123".into(),
+            "cargo build".into(),
+            "/project".into(),
+            Some(0),
+            now - 3_570_000,
+            now - 3_560_000,
+        );
+        let mut ctx3 = HashMap::new();
+        ctx3.insert("agent_prompt".into(), "fix the build".into());
+        e3.context = Some(ctx3);
+        e3.executor_type = Some("agent".into());
+        e3.executor = Some("claude-code".into());
+        repo.insert_entry(&e3).unwrap();
+
+        // Session 2: cursor, 2 commands, all ok, different directory
+        let s2 = crate::models::Session {
+            id: "cursor-def456".into(),
+            hostname: "test".into(),
+            created_at: now - 7_200_000,
+            tag_id: None,
+        };
+        repo.insert_session(&s2).unwrap();
+
+        let mut e4 = crate::models::Entry::new(
+            "cursor-def456".into(),
+            "git status".into(),
+            "/other-project".into(),
+            Some(0),
+            now - 7_200_000,
+            now - 7_199_900,
+        );
+        let mut ctx4 = HashMap::new();
+        ctx4.insert("agent_prompt".into(), "check git status".into());
+        e4.context = Some(ctx4);
+        e4.executor_type = Some("agent".into());
+        e4.executor = Some("cursor".into());
+        repo.insert_entry(&e4).unwrap();
+
+        let mut e5 = crate::models::Entry::new(
+            "cursor-def456".into(),
+            "git add .".into(),
+            "/other-project".into(),
+            Some(0),
+            now - 7_190_000,
+            now - 7_189_900,
+        );
+        e5.executor_type = Some("agent".into());
+        e5.executor = Some("cursor".into());
+        repo.insert_entry(&e5).unwrap();
+    }
+
+    #[test]
+    fn test_find_agent_session_empty_db() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "find_agent_session", &json!({}));
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().contains("No agent sessions found"),
+            "should report no sessions"
+        );
+    }
+
+    #[test]
+    fn test_find_agent_session_with_data() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        let result = call_tool(&repo, "find_agent_session", &json!({}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude-abc123"),
+            "should find claude session: {text}"
+        );
+        assert!(
+            text.contains("cursor-def456"),
+            "should find cursor session: {text}"
+        );
+        assert!(
+            text.contains("2 agent sessions"),
+            "should count sessions: {text}"
+        );
+    }
+
+    #[test]
+    fn test_find_agent_session_filter_by_directory() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        let result = call_tool(
+            &repo,
+            "find_agent_session",
+            &json!({"directory": "/project"}),
+        );
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude-abc123"),
+            "should find claude session: {text}"
+        );
+        assert!(
+            !text.contains("cursor-def456"),
+            "should NOT find cursor session: {text}"
+        );
+    }
+
+    #[test]
+    fn test_find_agent_session_filter_by_executor() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        let result = call_tool(&repo, "find_agent_session", &json!({"executor": "cursor"}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("cursor-def456"),
+            "should find cursor session: {text}"
+        );
+        assert!(
+            !text.contains("claude-abc123"),
+            "should NOT find claude session: {text}"
+        );
+    }
+
+    #[test]
+    fn test_find_agent_session_filter_by_prompt() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        // First verify entries exist by checking without prompt filter
+        let all = call_tool(&repo, "find_agent_session", &json!({}));
+        assert!(all.is_ok());
+        let all_text = all.unwrap();
+        assert!(
+            all_text.contains("claude-abc123"),
+            "baseline: sessions should exist: {all_text}"
+        );
+
+        // Now test with prompt filter
+        let result = call_tool(&repo, "find_agent_session", &json!({"prompt_text": "auth"}));
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude-abc123"),
+            "should find session with auth prompt: {text}"
+        );
+        assert!(
+            !text.contains("cursor-def456"),
+            "should NOT find cursor session: {text}"
+        );
+    }
+
+    #[test]
+    fn test_find_agent_session_shows_resume() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        let result = call_tool(
+            &repo,
+            "find_agent_session",
+            &json!({"executor": "claude-code"}),
+        );
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude --resume abc123"),
+            "should show resume command: {text}"
+        );
+    }
+
+    #[test]
+    fn test_replay_agent_session_not_found() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(
+            &repo,
+            "replay_agent_session",
+            &json!({"session_id": "nonexistent"}),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No session found"));
+    }
+
+    #[test]
+    fn test_replay_agent_session_with_data() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        let result = call_tool(
+            &repo,
+            "replay_agent_session",
+            &json!({"session_id": "claude-abc123"}),
+        );
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude-abc123"),
+            "should show session id: {text}"
+        );
+        assert!(
+            text.contains("3 commands"),
+            "should show command count: {text}"
+        );
+        assert!(text.contains("[PROMPT]"), "should show prompts: {text}");
+        assert!(
+            text.contains("refactor auth module"),
+            "should show prompt text: {text}"
+        );
+        assert!(text.contains("grep"), "should show commands: {text}");
+        assert!(text.contains("npm test"), "should show commands: {text}");
+        assert!(text.contains("Summary:"), "should show summary: {text}");
+    }
+
+    #[test]
+    fn test_replay_agent_session_prefix_normalization() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        // Pass without prefix — should find claude-abc123
+        let result = call_tool(
+            &repo,
+            "replay_agent_session",
+            &json!({"session_id": "abc123"}),
+        );
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude-abc123"),
+            "should resolve prefix: {text}"
+        );
+    }
+
+    #[test]
+    fn test_replay_agent_session_shows_resume() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        seed_agent_sessions(&repo);
+        let result = call_tool(
+            &repo,
+            "replay_agent_session",
+            &json!({"session_id": "claude-abc123"}),
+        );
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert!(
+            text.contains("claude --resume abc123"),
+            "should show resume command: {text}"
+        );
+    }
+
+    #[test]
+    fn test_replay_agent_session_requires_session_id() {
+        let (_dir, repo) = crate::test_utils::test_repo();
+        let result = call_tool(&repo, "replay_agent_session", &json!({}));
+        assert!(result.is_err());
     }
 }
