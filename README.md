@@ -18,7 +18,7 @@
 - **<2ms** recording overhead, **<10ms** search across 1M+ entries
 - **AI agent tracking** — auto-detects Claude Code, Cursor, OpenCode, Antigravity, Codex, Aider
 - **Prompt Explorer** — trace every command back to the prompt that triggered it
-- **MCP Server** — 11 tools including `assess_risk` for pre-execution safety checks
+- **MCP Server** — 15 tools + 7 resources. Agent session discovery, project context, failure learning, risk assessment. Configurable via `suv settings`
 - **100% local** — no cloud, no telemetry, no account. MIT licensed.
 
 > **Website & Docs:** [suvadu.sh](https://suvadu.sh) &middot; **CLI Reference:** [suvadu.sh/cli](https://suvadu.sh/cli/) &middot; **Blog:** [suvadu.sh/blog](https://suvadu.sh/blog/)
@@ -85,7 +85,7 @@ See the [full integration guide](https://suvadu.sh/blog/track-ai-agent-commands-
 |---------|---------|
 | **Search** | Fuzzy search TUI with filters, Smart mode, detail pane, bookmarks |
 | **Agent Dashboard** | Timeline, risk assessment, per-agent analytics, exportable reports |
-| **MCP Server** | 11 tools + 5 resources — AI agents query your history directly |
+| **MCP Server** | 15 tools + 7 resources — agent session replay, project context, failure learning, configurable |
 | **Prompt Explorer** | Trace commands back to the prompt that triggered them |
 | **Stats** | Heatmap, hourly distribution, top commands, executor breakdown |
 | **Organization** | Tags, bookmarks, notes, alias suggestions |
