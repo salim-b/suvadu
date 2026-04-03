@@ -294,6 +294,7 @@ fn run_init(target: cli::InitTarget) -> Result<(), Box<dyn std::error::Error>> {
             "antigravity",
         ),
         cli::InitTarget::Opencode => integrations::handle_init_opencode(),
+        cli::InitTarget::Pi => integrations::handle_init_pi(),
     }
 }
 
