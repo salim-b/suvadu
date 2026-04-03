@@ -56,6 +56,7 @@ pub enum InitTarget {
     Cursor,
     Antigravity,
     Opencode,
+    Pi,
 }
 
 #[derive(Subcommand)]
@@ -93,10 +94,10 @@ pub enum Commands {
 
     /// Set up shell hooks or AI tool integrations
     #[command(
-        after_help = "Targets:\n  zsh          Generate Zsh shell hooks (add to ~/.zshrc)\n  bash         Generate Bash shell hooks (add to ~/.bashrc)\n  claude-code  Set up Claude Code AI command capture\n  cursor       Set up Cursor AI command tracking\n  antigravity  Set up Antigravity IDE command tracking\n  opencode     Set up OpenCode AI command capture\n\nExamples:\n  eval \"$(suv init zsh)\"        # Add to ~/.zshrc\n  eval \"$(suv init bash)\"       # Add to ~/.bashrc\n  suv init claude-code          # Set up Claude Code capture\n  suv init cursor               # Set up Cursor tracking\n  suv init antigravity           # Set up Antigravity tracking\n  suv init opencode             # Set up OpenCode capture"
+        after_help = "Targets:\n  zsh          Generate Zsh shell hooks (add to ~/.zshrc)\n  bash         Generate Bash shell hooks (add to ~/.bashrc)\n  claude-code  Set up Claude Code AI command capture\n  cursor       Set up Cursor AI command tracking\n  antigravity  Set up Antigravity IDE command tracking\n  opencode     Set up OpenCode AI command capture\n  pi           Set up pi.dev agent command capture\n\nExamples:\n  eval \"$(suv init zsh)\"        # Add to ~/.zshrc\n  eval \"$(suv init bash)\"       # Add to ~/.bashrc\n  suv init claude-code          # Set up Claude Code capture\n  suv init cursor               # Set up Cursor tracking\n  suv init antigravity          # Set up Antigravity tracking\n  suv init opencode             # Set up OpenCode capture\n  suv init pi                   # Set up pi.dev capture"
     )]
     Init {
-        /// Target: 'zsh', 'bash', 'claude-code', 'cursor', 'antigravity', or 'opencode'
+        /// Target: 'zsh', 'bash', 'claude-code', 'cursor', 'antigravity', 'opencode', or 'pi'
         target: InitTarget,
     },
 
