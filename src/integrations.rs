@@ -986,13 +986,25 @@ function getCachedPrompt(sessionId: string): string | undefined {
   return undefined;
 }
 
-// Derive a stable session ID from the session file path
-function deriveSessionId(sessionFile: string | undefined): string {
-  if (!sessionFile) return "unknown";
-  // Session files are typically JSONL files with UUID-like names
-  const base = basename(sessionFile, ".jsonl");
-  // Use first 12 chars of the session ID for readability
-  return base.slice(0, 12);
+// Get session ID from context or derive from file
+function getSessionId(ctx: { sessionManager: { getSessionId?: () => string; getSessionFile?: () => string | undefined } }): string {
+  // Prefer the session UUID from the session manager
+  if (ctx.sessionManager.getSessionId) {
+    const id = ctx.sessionManager.getSessionId();
+    if (id) return id;
+  }
+  // Fallback: extract from filename (timestamp_uuid.jsonl)
+  const sessionFile = ctx.sessionManager.getSessionFile?.();
+  if (sessionFile) {
+    const base = basename(sessionFile, ".jsonl");
+    // Filename pattern: <timestamp>_<uuid>.jsonl - extract the UUID part
+    const parts = base.split("_");
+    if (parts.length >= 2) {
+      return parts[parts.length - 1]; // The UUID part
+    }
+    return base;
+  }
+  return "unknown";
 }
 
 // Record a command via suvadu CLI
@@ -1036,9 +1048,8 @@ function recordCommand(params: {
 
 export default function (pi: ExtensionAPI): void {
   // Capture user prompts before each agent turn
-  pi.on("before_agent_start", async (event, _ctx) => {
-    const sessionFile = _ctx.sessionManager.getSessionFile();
-    const sessionId = deriveSessionId(sessionFile);
+  pi.on("before_agent_start", async (event, ctx) => {
+    const sessionId = getSessionId(ctx);
     const prompt = event.prompt || "";
 
     if (prompt && sessionId !== "unknown") {
@@ -1047,16 +1058,15 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // Track bash tool calls before execution
-  pi.on("tool_call", async (event, _ctx) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return;
 
-    const sessionFile = _ctx.sessionManager.getSessionFile();
-    const sessionId = deriveSessionId(sessionFile);
+    const sessionId = getSessionId(ctx);
     const prompt = getCachedPrompt(sessionId);
 
     pendingBash.set(event.toolCallId, {
       command: (event.input as { command?: string }).command || "",
-      cwd: _ctx.cwd,
+      cwd: ctx.cwd,
       startTime: Date.now(),
       sessionId,
       prompt,
