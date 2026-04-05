@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-04-05
+
+### Added
+- **`suv history`** — Non-interactive history dump with all standard filters (`--after`, `--before`, `--tag`, `--exit-code`, `--executor`, `--here`, `--cwd`). Supports `-n` for result count and `--json` for JSONL output. Pipeable to other tools. Newest-first by default.
+- **`suv doctor`** — Diagnostic command that checks shell version, shell hooks, config validity, database health (schema version + integrity check), recording state, MCP server registration (Claude Code and Cursor), and agent hook scripts. Reports pass/warn/fail with actionable fix hints.
+- **Configurable search scoring** — Three new `[search]` config fields: `length_threshold` (command length penalty, default 80), `human_boost_percent` (boost for human commands over agent commands, default 33%), `cwd_boost_percent` (boost for same-directory commands, default 50%). Tune via `suv settings` or `config.toml`. Setting a boost to 0 disables it.
+- **pi.dev agent integration** — `suv init pi` installs a TypeScript extension for [pi.dev](https://pi.dev) that captures bash commands and prompts via pi.dev's event system. Commands are recorded with `executor=pi`.
+
+### Changed
+- **Full session UUID** — Session filenames now use the full UUID instead of a truncated 8-character prefix, avoiding rare collisions.
+
 ## [0.3.0] - 2026-04-01
 
 ### Added

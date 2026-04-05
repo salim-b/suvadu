@@ -16,7 +16,7 @@
 **Suvadu** replaces your shell history with a SQLite-backed store. Every command gets structured context — exit code, duration, directory, executor, session. AI agents can query it via MCP. 100% local.
 
 - **<2ms** recording overhead, **<10ms** search across 1M+ entries
-- **AI agent tracking** — auto-detects Claude Code, Cursor, OpenCode, Antigravity, Codex, Aider
+- **AI agent tracking** — auto-detects Claude Code, Cursor, OpenCode, Antigravity, pi.dev, Codex, Aider
 - **Prompt Explorer** — trace every command back to the prompt that triggered it
 - **MCP Server** — 15 tools + 7 resources. Agent session discovery, project context, failure learning, risk assessment. Configurable via `suv settings`
 - **100% local** — no cloud, no telemetry, no account. MIT licensed.
@@ -56,8 +56,11 @@ Verify: `suv status`
 
 ```bash
 suv search                  # Interactive search TUI (also Ctrl+R)
+suv history                 # Print last 25 commands (pipeable)
+suv history --json -n 100   # Last 100 commands as JSONL
 suv stats                   # Stats dashboard with heatmap
 suv replay --after today    # Timeline of today's commands
+suv doctor                  # Check installation health
 suv agent dashboard         # Monitor AI agent activity
 suv agent prompts           # Browse prompts and their commands
 ```
@@ -70,6 +73,7 @@ suv agent prompts           # Browse prompts and their commands
 suv init claude-code    # Claude Code — hooks + MCP + prompt capture
 suv init cursor         # Cursor — hooks + MCP + prompt capture
 suv init opencode       # OpenCode — plugin + prompt capture
+suv init pi             # pi.dev — extension + prompt capture
 suv init antigravity    # Antigravity — auto-detect
 ```
 
@@ -84,10 +88,12 @@ See the [full integration guide](https://suvadu.sh/blog/track-ai-agent-commands-
 | Feature | Details |
 |---------|---------|
 | **Search** | Fuzzy search TUI with filters, Smart mode, detail pane, bookmarks |
+| **History** | Non-interactive `suv history` with filters, `--json`, pipeable to other tools |
 | **Agent Dashboard** | Timeline, risk assessment, per-agent analytics, exportable reports |
 | **MCP Server** | 15 tools + 7 resources — agent session replay, project context, failure learning, configurable |
 | **Prompt Explorer** | Trace commands back to the prompt that triggered them |
 | **Stats** | Heatmap, hourly distribution, top commands, executor breakdown |
+| **Doctor** | `suv doctor` checks shell, hooks, config, database, MCP, and agent hooks health |
 | **Organization** | Tags, bookmarks, notes, alias suggestions |
 | **Privacy** | Space-prefix exclusion, regex patterns, secret redaction, local-only |
 | **Arrow Keys** | Frecency-ranked Up/Down that prefers same-directory commands |
