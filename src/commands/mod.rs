@@ -1,4 +1,5 @@
 pub mod alias;
+pub mod doctor;
 pub mod entry;
 pub mod replay;
 pub mod search;

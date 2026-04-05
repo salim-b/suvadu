@@ -91,6 +91,10 @@ fn run_command(command: Commands) -> Result<(), Box<dyn std::error::Error>> {
         } => commands::search::handle_get(&query, offset, prefix, cwd.as_deref()),
         Commands::Settings => commands::settings::handle_settings(),
         Commands::Status => commands::settings::handle_status(),
+        Commands::Doctor => {
+            commands::doctor::handle_doctor();
+            Ok(())
+        }
         Commands::Tag(cmd) => commands::tag::handle_tag(cmd),
         Commands::Bookmark(cmd) => commands::entry::handle_bookmark(cmd),
         Commands::Alias(cmd) => commands::alias::handle_alias(cmd),

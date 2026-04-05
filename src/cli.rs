@@ -245,6 +245,9 @@ pub enum Commands {
     /// Check current recording status
     Status,
 
+    /// Diagnose installation health and configuration issues
+    Doctor,
+
     /// Bulk delete commands matching a pattern
     #[command(
         after_help = "Examples:\n  suv delete \"rm -rf\"          # Delete by substring\n  suv delete \"^git\" --regex    # Delete using regex\n  suv delete \"\" --before 2024-01-01 # Delete all before date"
