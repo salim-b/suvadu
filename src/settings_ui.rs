@@ -84,7 +84,7 @@ impl SettingsTab {
 
     fn item_count(self, config: &Config) -> usize {
         match self {
-            Self::Search => 6,
+            Self::Search => 9,
             Self::Shell => 3,
             Self::Exclusions => config.exclusions.len(),
             Self::AutoTags => config.auto_tags.len(),
@@ -442,6 +442,18 @@ impl AppState {
                         self.input_mode = InputMode::Editing;
                         self.input_buffer = self.config.search.page_limit.to_string();
                     }
+                    (SettingsTab::Search, 6) => {
+                        self.input_mode = InputMode::Editing;
+                        self.input_buffer = self.config.search.length_threshold.to_string();
+                    }
+                    (SettingsTab::Search, 7) => {
+                        self.input_mode = InputMode::Editing;
+                        self.input_buffer = self.config.search.human_boost_percent.to_string();
+                    }
+                    (SettingsTab::Search, 8) => {
+                        self.input_mode = InputMode::Editing;
+                        self.input_buffer = self.config.search.cwd_boost_percent.to_string();
+                    }
                     (SettingsTab::Mcp, 0) => {
                         self.input_mode = InputMode::Editing;
                         self.input_buffer = self.config.mcp.default_days.to_string();
@@ -506,6 +518,42 @@ impl AppState {
                         self.save_status = Some(format!(
                             "Page limit set to {}",
                             self.config.search.page_limit
+                        ));
+                    } else {
+                        self.save_status = Some("Invalid number".to_string());
+                    }
+                    self.input_mode = InputMode::Normal;
+                } else if (self.current_tab, self.selected_item) == (SettingsTab::Search, 6) {
+                    if let Ok(n) = self.input_buffer.parse::<usize>() {
+                        self.config.search.length_threshold = n.clamp(10, 500);
+                        self.dirty = true;
+                        self.save_status = Some(format!(
+                            "Length threshold set to {}",
+                            self.config.search.length_threshold
+                        ));
+                    } else {
+                        self.save_status = Some("Invalid number".to_string());
+                    }
+                    self.input_mode = InputMode::Normal;
+                } else if (self.current_tab, self.selected_item) == (SettingsTab::Search, 7) {
+                    if let Ok(n) = self.input_buffer.parse::<u32>() {
+                        self.config.search.human_boost_percent = n.min(100);
+                        self.dirty = true;
+                        self.save_status = Some(format!(
+                            "Human boost set to {}%",
+                            self.config.search.human_boost_percent
+                        ));
+                    } else {
+                        self.save_status = Some("Invalid number".to_string());
+                    }
+                    self.input_mode = InputMode::Normal;
+                } else if (self.current_tab, self.selected_item) == (SettingsTab::Search, 8) {
+                    if let Ok(n) = self.input_buffer.parse::<u32>() {
+                        self.config.search.cwd_boost_percent = n.min(100);
+                        self.dirty = true;
+                        self.save_status = Some(format!(
+                            "CWD boost set to {}%",
+                            self.config.search.cwd_boost_percent
                         ));
                     } else {
                         self.save_status = Some("Invalid number".to_string());
@@ -931,6 +979,10 @@ const fn get_setting_description(tab: usize, item: usize) -> &'static str {
         (0, 2) => "Filter search results by the current session's tag",
         (0, 3) => "Boost results from the current directory higher in search (toggle with ^S)",
         (0, 4) => "Show the detail preview pane when opening search (toggle with Tab)",
+        (0, 5) => "Vim-style modal navigation: j/k to move, / to search, q to quit",
+        (0, 6) => "Commands longer than this (in characters) get a scoring penalty (10-500)",
+        (0, 7) => "Boost percentage for human-typed commands over agent commands. 0 = disabled (0-100)",
+        (0, 8) => "Boost percentage for same-directory commands when Smart Mode is on. 0 = disabled (0-100)",
         (1, 0) => "Bind Up/Down arrow keys to cycle through command history",
         (1, 1) => "Show risk assessment badges in the search detail pane for agent commands",
         (1, 2) => "Color theme: dark (RGB for dark terminals), light (RGB for light terminals), terminal (ANSI 16 — adapts to your scheme). Changes apply immediately.",
@@ -977,6 +1029,24 @@ fn render_search_tab(f: &mut ratatui::Frame, app: &AppState, area: Rect) {
             "Vim Mode (j/k navigation, / to search, q to quit)",
             app.config.search.vim_mode,
             app.selected_item == 5,
+        ),
+        setting_item(
+            "Length Threshold",
+            &app.config.search.length_threshold.to_string(),
+            app.selected_item == 6,
+            false,
+        ),
+        setting_item(
+            "Human Boost %",
+            &format!("{}%", app.config.search.human_boost_percent),
+            app.selected_item == 7,
+            false,
+        ),
+        setting_item(
+            "CWD Boost %",
+            &format!("{}%", app.config.search.cwd_boost_percent),
+            app.selected_item == 8,
+            false,
         ),
     ];
 
@@ -1615,6 +1685,12 @@ mod tests {
         app.next_item();
         assert_eq!(app.selected_item, 5);
         app.next_item();
+        assert_eq!(app.selected_item, 6);
+        app.next_item();
+        assert_eq!(app.selected_item, 7);
+        app.next_item();
+        assert_eq!(app.selected_item, 8);
+        app.next_item();
         assert_eq!(app.selected_item, 0); // Cycle back
     }
 
@@ -1729,12 +1805,12 @@ mod tests {
         let config = Config::default();
         let mut app = AppState::new(config);
 
-        // Tab 0 has 6 items; going prev from 0 wraps to 5
+        // Tab 0 has 9 items; going prev from 0 wraps to 8
         assert_eq!(app.selected_item, 0);
         app.prev_item();
-        assert_eq!(app.selected_item, 5);
+        assert_eq!(app.selected_item, 8);
 
-        // And going next from 5 wraps to 0
+        // And going next from 8 wraps to 0
         app.next_item();
         assert_eq!(app.selected_item, 0);
     }

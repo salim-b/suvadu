@@ -60,19 +60,14 @@ impl SearchApp {
         query: &str,
         boost_cwd: Option<&str>,
         field: SearchField,
+        length_threshold: usize,
+        human_boost_percent: u32,
+        cwd_boost_percent: u32,
     ) -> Vec<Entry> {
         use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
         use nucleo_matcher::{Config as MatcherConfig, Matcher, Utf32Str};
 
-        // Scoring constants:
-        // LENGTH_THRESHOLD: commands up to this length keep full score.
-        // HUMAN_BOOST_FRACTION: human commands get +33% score (1/3) to
-        //   surface interactive history over agent-generated commands.
-        // CWD_BOOST_FRACTION: same-directory commands get +50% score (1/2)
-        //   because working-directory locality is a strong relevance signal.
-        const LENGTH_THRESHOLD: f64 = 80.0;
-        const HUMAN_BOOST_FRACTION: u32 = 3;
-        const CWD_BOOST_FRACTION: u32 = 2;
+        let threshold = (length_threshold.max(1)) as f64;
 
         let mut matcher = Matcher::new(MatcherConfig::DEFAULT);
         let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
@@ -95,24 +90,27 @@ impl SearchApp {
             let haystack = Utf32Str::new(field_value, &mut buf);
             if let Some(score) = pattern.score(haystack, &mut matcher) {
                 // Penalise long commands — short matches are more relevant.
-                // Commands ≤ LENGTH_THRESHOLD chars keep full score; longer
-                // ones are scaled down by sqrt(threshold/len) so a 500-char
-                // command gets ~40% score.
+                // Commands ≤ length_threshold chars keep full score; longer
+                // ones are scaled down by sqrt(threshold/len).
                 let cmd_len = field_value.len().max(1) as f64;
-                let length_factor = if cmd_len <= LENGTH_THRESHOLD {
+                let length_factor = if cmd_len <= threshold {
                     1.0
                 } else {
-                    (LENGTH_THRESHOLD / cmd_len).sqrt()
+                    (threshold / cmd_len).sqrt()
                 };
                 let mut final_score = (f64::from(score) * length_factor) as u32;
 
                 // Boost human-executed commands over agent commands
-                if entry.is_human() {
-                    final_score = final_score.saturating_add(final_score / HUMAN_BOOST_FRACTION);
+                if entry.is_human() && human_boost_percent > 0 {
+                    final_score = final_score.saturating_add(
+                        (f64::from(final_score) * f64::from(human_boost_percent) / 100.0) as u32,
+                    );
                 }
                 // Boost same-CWD commands
-                if boost_cwd.is_some_and(|cwd| entry.cwd == cwd) {
-                    final_score = final_score.saturating_add(final_score / CWD_BOOST_FRACTION);
+                if boost_cwd.is_some_and(|cwd| entry.cwd == cwd) && cwd_boost_percent > 0 {
+                    final_score = final_score.saturating_add(
+                        (f64::from(final_score) * f64::from(cwd_boost_percent) / 100.0) as u32,
+                    );
                 }
                 scored.push((entry, final_score));
             }
@@ -180,8 +178,15 @@ impl SearchApp {
                 } else {
                     None
                 };
-                let scored =
-                    Self::fuzzy_score(entries, &self.query, boost_cwd, self.view.search_field);
+                let scored = Self::fuzzy_score(
+                    entries,
+                    &self.query,
+                    boost_cwd,
+                    self.view.search_field,
+                    self.view.length_threshold,
+                    self.view.human_boost_percent,
+                    self.view.cwd_boost_percent,
+                );
                 self.unique_counts = count_map;
                 self.fuzzy_results = scored;
             } else {
@@ -192,8 +197,15 @@ impl SearchApp {
                 } else {
                     None
                 };
-                self.fuzzy_results =
-                    Self::fuzzy_score(entries, &self.query, boost_cwd, self.view.search_field);
+                self.fuzzy_results = Self::fuzzy_score(
+                    entries,
+                    &self.query,
+                    boost_cwd,
+                    self.view.search_field,
+                    self.view.length_threshold,
+                    self.view.human_boost_percent,
+                    self.view.cwd_boost_percent,
+                );
             }
 
             self.pagination.total_items = self.fuzzy_results.len();

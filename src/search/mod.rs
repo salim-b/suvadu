@@ -71,6 +71,9 @@ pub struct ViewOptions {
     pub detail_pane_open: bool,
     pub search_field: SearchField,
     pub current_cwd: Option<String>,
+    pub length_threshold: usize,
+    pub human_boost_percent: u32,
+    pub cwd_boost_percent: u32,
 }
 
 /// Active filter values and filter-dialog text inputs.
@@ -506,6 +509,9 @@ pub fn run_search(
             detail_pane_open: config.search.show_detail_pane,
             search_field: args.field,
             current_cwd: None, // set in SearchApp::new
+            length_threshold: config.search.length_threshold,
+            human_boost_percent: config.search.human_boost_percent,
+            cwd_boost_percent: config.search.cwd_boost_percent,
         },
     });
 

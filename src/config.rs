@@ -79,6 +79,12 @@ pub struct SearchConfig {
     pub show_detail_pane: bool,
     #[serde(default = "default_false")]
     pub vim_mode: bool,
+    #[serde(default = "default_length_threshold")]
+    pub length_threshold: usize,
+    #[serde(default = "default_human_boost_percent")]
+    pub human_boost_percent: u32,
+    #[serde(default = "default_cwd_boost_percent")]
+    pub cwd_boost_percent: u32,
 }
 
 impl Default for SearchConfig {
@@ -90,11 +96,26 @@ impl Default for SearchConfig {
             context_boost: true,
             show_detail_pane: true,
             vim_mode: false,
+            length_threshold: 80,
+            human_boost_percent: 33,
+            cwd_boost_percent: 50,
         }
     }
 }
 
 const fn default_page_limit() -> usize {
+    50
+}
+
+const fn default_length_threshold() -> usize {
+    80
+}
+
+const fn default_human_boost_percent() -> u32 {
+    33
+}
+
+const fn default_cwd_boost_percent() -> u32 {
     50
 }
 
@@ -338,6 +359,21 @@ fn validate_config(config: &Config) -> ConfigResult<()> {
     if config.search.page_limit > 10_000 {
         return Err(ConfigError::Path(
             "search.page_limit exceeds maximum of 10000".into(),
+        ));
+    }
+    if config.search.length_threshold == 0 || config.search.length_threshold > 500 {
+        return Err(ConfigError::Path(
+            "search.length_threshold must be between 1 and 500".into(),
+        ));
+    }
+    if config.search.human_boost_percent > 100 {
+        return Err(ConfigError::Path(
+            "search.human_boost_percent must be between 0 and 100".into(),
+        ));
+    }
+    if config.search.cwd_boost_percent > 100 {
+        return Err(ConfigError::Path(
+            "search.cwd_boost_percent must be between 0 and 100".into(),
         ));
     }
     for pattern in &config.exclusions {

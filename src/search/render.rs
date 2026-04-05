@@ -1424,6 +1424,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
 
@@ -1505,6 +1508,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -1545,6 +1551,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -1595,6 +1604,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         super::SearchApp::new(config)
@@ -1712,6 +1724,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -1755,6 +1770,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -1798,6 +1816,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -2067,6 +2088,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -2125,6 +2149,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         };
         let app = super::SearchApp::new(config);
@@ -2270,6 +2297,9 @@ mod tests {
                 detail_pane_open: false,
                 search_field: crate::models::SearchField::Command,
                 current_cwd: None,
+                length_threshold: 80,
+                human_boost_percent: 33,
+                cwd_boost_percent: 50,
             },
         }
     }
