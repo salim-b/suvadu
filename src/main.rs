@@ -95,6 +95,27 @@ fn run_command(command: Commands) -> Result<(), Box<dyn std::error::Error>> {
             commands::doctor::handle_doctor();
             Ok(())
         }
+        Commands::History {
+            after,
+            before,
+            tag,
+            exit_code,
+            executor,
+            here,
+            cwd,
+            limit,
+            json,
+        } => commands::history::handle_history(
+            after.as_deref(),
+            before.as_deref(),
+            tag.as_deref(),
+            exit_code,
+            executor.as_deref(),
+            here,
+            cwd.as_deref(),
+            limit,
+            json,
+        ),
         Commands::Tag(cmd) => commands::tag::handle_tag(cmd),
         Commands::Bookmark(cmd) => commands::entry::handle_bookmark(cmd),
         Commands::Alias(cmd) => commands::alias::handle_alias(cmd),

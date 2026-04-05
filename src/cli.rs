@@ -242,6 +242,40 @@ pub enum Commands {
         cwd: Option<String>,
     },
 
+    /// Print command history (non-interactive, pipeable)
+    #[command(
+        after_help = "Examples:\n  suv history                        # Last 25 commands\n  suv history -n 100                 # Last 100 commands\n  suv history --here                 # Commands from current directory\n  suv history --after today --json   # Today's commands as JSONL\n  suv history --executor agent       # Agent-executed commands\n  suv history | grep cargo           # Pipe to other tools"
+    )]
+    History {
+        /// Show commands after this date (YYYY-MM-DD, "today", "yesterday", "N days ago")
+        #[arg(long)]
+        after: Option<String>,
+        /// Show commands before this date
+        #[arg(long)]
+        before: Option<String>,
+        /// Filter by tag name
+        #[arg(long)]
+        tag: Option<String>,
+        /// Filter by exit code
+        #[arg(long)]
+        exit_code: Option<i32>,
+        /// Filter by executor
+        #[arg(long)]
+        executor: Option<String>,
+        /// Filter to commands run in the current directory
+        #[arg(long)]
+        here: bool,
+        /// Filter to a specific directory
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Number of entries to show
+        #[arg(short = 'n', long, default_value_t = 25)]
+        limit: usize,
+        /// Output as JSON lines (one JSON object per line)
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Check current recording status
     Status,
 

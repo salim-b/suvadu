@@ -1,6 +1,7 @@
 pub mod alias;
 pub mod doctor;
 pub mod entry;
+pub mod history;
 pub mod replay;
 pub mod search;
 pub mod session;
