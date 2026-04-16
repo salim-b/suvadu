@@ -238,11 +238,11 @@ fn read_today_stats(repo: &Repository) -> Result<String, String> {
     }
 
     let mut top_cmds: Vec<_> = cmd_counts.into_iter().collect();
-    top_cmds.sort_by(|a, b| b.1.cmp(&a.1));
+    top_cmds.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_cmds.truncate(5);
 
     let mut top_dirs: Vec<_> = dir_counts.into_iter().collect();
-    top_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+    top_dirs.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_dirs.truncate(3);
 
     let mut out = String::new();
@@ -491,7 +491,7 @@ fn group_agent_sessions(
         })
         .collect();
 
-    sessions.sort_by(|a, b| b.5.cmp(&a.5));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.5));
     sessions
 }
 
@@ -553,7 +553,7 @@ fn read_project_context(repo: &Repository) -> Result<String, String> {
         *cmd_counts.entry(program).or_default() += 1;
     }
     let mut top_cmds: Vec<_> = cmd_counts.into_iter().collect();
-    top_cmds.sort_by(|a, b| b.1.cmp(&a.1));
+    top_cmds.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_cmds.truncate(8);
 
     if !top_cmds.is_empty() {
@@ -582,7 +582,7 @@ fn read_project_context(repo: &Repository) -> Result<String, String> {
             }
         }
         let mut sorted_fails: Vec<_> = fail_counts.into_iter().collect();
-        sorted_fails.sort_by(|a, b| (b.1).0.cmp(&(a.1).0));
+        sorted_fails.sort_by_key(|b| std::cmp::Reverse((b.1).0));
 
         let _ = writeln!(out, "  Recent failures (last 24h):");
         for (cmd, (count, last_at)) in sorted_fails.iter().take(5) {

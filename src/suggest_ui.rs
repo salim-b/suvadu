@@ -114,12 +114,11 @@ impl AppState {
                 KeyCode::Backspace => {
                     self.edit_buffer.pop();
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c)
                     // Only allow valid alias name chars
-                    if c.is_alphanumeric() || c == '_' || c == '-' {
+                    if (c.is_alphanumeric() || c == '_' || c == '-') => {
                         self.edit_buffer.push(c);
                     }
-                }
                 _ => {}
             },
         }

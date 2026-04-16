@@ -427,9 +427,7 @@ pub fn is_enabled() -> ConfigResult<bool> {
 
 /// Check if recording is paused for current session (from environment)
 pub fn is_paused() -> bool {
-    std::env::var("SUVADU_PAUSED")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false)
+    std::env::var("SUVADU_PAUSED").is_ok_and(|v| v == "1" || v.to_lowercase() == "true")
 }
 
 /// Check if we should record history (combines global and session checks)

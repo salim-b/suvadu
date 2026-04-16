@@ -130,11 +130,9 @@ impl SearchApp {
             .total_items
             .div_ceil(self.pagination.page_size)
             .max(1);
-        let progress_pct = if total_pages > 0 {
-            (self.pagination.page * 100) / total_pages
-        } else {
-            0
-        };
+        let progress_pct = (self.pagination.page * 100)
+            .checked_div(total_pages)
+            .unwrap_or(0);
 
         let status_text = if let Some((msg, time)) = &self.status_message {
             if time.elapsed() < std::time::Duration::from_secs(2) {

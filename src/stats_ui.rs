@@ -1009,7 +1009,7 @@ fn compute_program_groups(
         *groups.entry(resolved.to_string()).or_insert(0) += count;
     }
     let mut sorted: Vec<(String, i64)> = groups.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
     sorted
 }
 

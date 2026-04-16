@@ -140,11 +140,11 @@ impl AgentStatsApp {
                     0
                 };
                 let mut top_dirs: Vec<_> = b.dir_counts.into_iter().collect();
-                top_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+                top_dirs.sort_by_key(|b| std::cmp::Reverse(b.1));
                 top_dirs.truncate(10);
 
                 let mut high_risk_cmds = b.high_risk_cmds;
-                high_risk_cmds.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+                high_risk_cmds.sort_by_key(|b| std::cmp::Reverse(b.started_at));
                 high_risk_cmds.truncate(20);
 
                 AgentStat {
@@ -160,7 +160,7 @@ impl AgentStatsApp {
             })
             .collect();
 
-        result.sort_by(|a, b| b.total.cmp(&a.total));
+        result.sort_by_key(|b| std::cmp::Reverse(b.total));
         result
     }
 
@@ -210,11 +210,9 @@ impl AgentStatsApp {
                         self.selected = self.selected.saturating_sub(1);
                         self.risk_selected = 0;
                     }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        if !self.agents.is_empty() {
-                            self.selected = (self.selected + 1).min(self.agents.len() - 1);
-                            self.risk_selected = 0;
-                        }
+                    KeyCode::Right | KeyCode::Char('l') if !self.agents.is_empty() => {
+                        self.selected = (self.selected + 1).min(self.agents.len() - 1);
+                        self.risk_selected = 0;
                     }
                     _ => {}
                 },
@@ -825,7 +823,7 @@ where
         let timeout = if app.status_message.is_some() {
             std::time::Duration::from_secs(2)
         } else {
-            std::time::Duration::from_secs(60)
+            std::time::Duration::from_mins(1)
         };
         if !event::poll(timeout)? {
             continue;

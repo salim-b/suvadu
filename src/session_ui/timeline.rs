@@ -182,33 +182,25 @@ impl SessionApp {
                 }
             }
             // Page navigation
-            KeyCode::Left | KeyCode::PageUp => {
-                if self.page > 1 {
-                    self.page -= 1;
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Left | KeyCode::PageUp if self.page > 1 => {
+                self.page -= 1;
+                self.table_state.select(Some(0));
             }
-            KeyCode::Right | KeyCode::PageDown => {
-                if self.page < self.total_pages() {
-                    self.page += 1;
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Right | KeyCode::PageDown if self.page < self.total_pages() => {
+                self.page += 1;
+                self.table_state.select(Some(0));
             }
             // Row navigation
             KeyCode::Up | KeyCode::Char('k') => self.move_up(),
             KeyCode::Down | KeyCode::Char('j') => self.move_down(),
-            KeyCode::Home | KeyCode::Char('g') => {
-                if !self.page_slice().is_empty() {
-                    self.page = 1;
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Home | KeyCode::Char('g') if !self.page_slice().is_empty() => {
+                self.page = 1;
+                self.table_state.select(Some(0));
             }
-            KeyCode::End | KeyCode::Char('G') => {
-                if !self.timeline.is_empty() {
-                    self.page = self.total_pages();
-                    let last = self.page_slice().len().saturating_sub(1);
-                    self.table_state.select(Some(last));
-                }
+            KeyCode::End | KeyCode::Char('G') if !self.timeline.is_empty() => {
+                self.page = self.total_pages();
+                let last = self.page_slice().len().saturating_sub(1);
+                self.table_state.select(Some(last));
             }
             _ => {}
         }
@@ -959,7 +951,7 @@ where
         let timeout = if app.status_message.is_some() {
             std::time::Duration::from_secs(2)
         } else {
-            std::time::Duration::from_secs(60)
+            std::time::Duration::from_mins(1)
         };
         if !event::poll(timeout)? {
             continue;

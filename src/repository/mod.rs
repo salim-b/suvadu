@@ -501,7 +501,7 @@ impl Repository {
         let db_path = crate::db::get_db_path()?;
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let conn = Connection::open_with_flags(&db_path, flags)?;
-        conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         Ok(Self::new(conn))
     }
 

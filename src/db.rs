@@ -98,8 +98,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
         [],
         |row| row.get::<_, i64>(0),
     )
-    .map(|count| count > 0)
-    .unwrap_or(false)
+    .is_ok_and(|count| count > 0)
 }
 
 /// Migration v1: full schema as of initial release.
@@ -248,7 +247,7 @@ pub fn init_db(path: &PathBuf) -> DbResult<Connection> {
     }
 
     // Retry on SQLITE_BUSY for up to 5 seconds (concurrent shell sessions)
-    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
     // Enforce foreign key constraints (off by default in SQLite, must be set per-connection)
     conn.pragma_update(None, "foreign_keys", "ON")?;

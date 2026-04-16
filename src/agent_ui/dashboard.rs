@@ -262,17 +262,13 @@ impl AgentApp {
                 }
             }
             // Page navigation
-            KeyCode::Left => {
-                if self.page > 1 {
-                    self.page -= 1;
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Left if self.page > 1 => {
+                self.page -= 1;
+                self.table_state.select(Some(0));
             }
-            KeyCode::Right => {
-                if self.page < self.total_pages() {
-                    self.page += 1;
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Right if self.page < self.total_pages() => {
+                self.page += 1;
+                self.table_state.select(Some(0));
             }
             // Row navigation
             KeyCode::Up | KeyCode::Char('k') => {
@@ -287,16 +283,12 @@ impl AgentApp {
                         .select(Some(cur.saturating_add(1).min(max)));
                 }
             }
-            KeyCode::Home => {
-                if !self.page_slice().is_empty() {
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Home if !self.page_slice().is_empty() => {
+                self.table_state.select(Some(0));
             }
-            KeyCode::End => {
-                if !self.page_slice().is_empty() {
-                    self.table_state
-                        .select(Some(self.page_slice().len().saturating_sub(1)));
-                }
+            KeyCode::End if !self.page_slice().is_empty() => {
+                self.table_state
+                    .select(Some(self.page_slice().len().saturating_sub(1)));
             }
             _ => {}
         }
@@ -1188,7 +1180,7 @@ where
         let timeout = if app.status_message.is_some() {
             std::time::Duration::from_secs(2)
         } else {
-            std::time::Duration::from_secs(60)
+            std::time::Duration::from_mins(1)
         };
         if !event::poll(timeout)? {
             continue; // timeout — re-render to clear stale status

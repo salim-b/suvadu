@@ -639,11 +639,11 @@ fn handle_get_stats(repo: &Repository, args: &Value) -> Result<String, String> {
     }
 
     let mut top_cmds: Vec<_> = cmd_counts.into_iter().collect();
-    top_cmds.sort_by(|a, b| b.1.cmp(&a.1));
+    top_cmds.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_cmds.truncate(10);
 
     let mut top_dirs: Vec<_> = dir_counts.into_iter().collect();
-    top_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+    top_dirs.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_dirs.truncate(5);
 
     let dir_ctx = directory.map_or_else(String::new, |d| format!(" in {d}"));
@@ -825,7 +825,7 @@ fn handle_what_changed(repo: &Repository, args: &Value) -> Result<String, String
 
     // Sort categories by count descending
     let mut sorted: Vec<_> = categories.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
 
     for (category, cmds) in &sorted {
         let _ = writeln!(out, "  {} ({}):", category.to_uppercase(), cmds.len());
@@ -922,7 +922,7 @@ fn handle_what_failed(repo: &Repository, args: &Value) -> Result<String, String>
     if !by_prompt.is_empty() {
         let _ = writeln!(out, "FAILURES TRIGGERED BY PROMPTS:");
         let mut sorted: Vec<_> = by_prompt.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
 
         for (prompt, cmds) in &sorted {
             let _ = writeln!(out, "\n  Prompt: \"{prompt}\"");
@@ -1245,7 +1245,7 @@ fn build_session_groups(entries: &[crate::models::Entry]) -> Vec<AgentSessionSum
         })
         .collect();
 
-    sessions.sort_by(|a, b| b.last_command_at.cmp(&a.last_command_at));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.last_command_at));
     sessions
 }
 
@@ -1410,7 +1410,7 @@ fn handle_replay_agent_session(repo: &Repository, args: &Value) -> Result<String
         .unwrap_or_else(|| "unknown".to_string());
     let total = entries.len();
     let success = entries.iter().filter(|e| e.exit_code == Some(0)).count();
-    let rate = if total > 0 { success * 100 / total } else { 0 };
+    let rate = (success * 100).checked_div(total).unwrap_or(0);
 
     let mut out = String::new();
     let _ = writeln!(
@@ -1440,7 +1440,7 @@ fn handle_replay_agent_session(repo: &Repository, args: &Value) -> Result<String
             None => "?".to_string(),
         };
         let dur = util::format_duration_ms(entry.duration_ms);
-        let _ = writeln!(out, "  [{exit:<7}] {}", entry.command,);
+        let _ = writeln!(out, "  [{exit:<7}] {}", entry.command);
         let _ = writeln!(
             out,
             "           {} | {} | {}\n",
@@ -1598,18 +1598,12 @@ fn handle_learn_from_failures(repo: &Repository, args: &Value) -> Result<String,
             s.fails, s.total,
         );
         if s.agent_total > 0 && s.total > s.agent_total {
-            let agent_rate = if s.agent_total > 0 {
-                s.agent_fails * 100 / s.agent_total
-            } else {
-                0
-            };
+            let agent_rate = (s.agent_fails * 100)
+                .checked_div(s.agent_total)
+                .unwrap_or(0);
             let human_total = s.total - s.agent_total;
             let human_fails = s.fails - s.agent_fails;
-            let human_rate = if human_total > 0 {
-                human_fails * 100 / human_total
-            } else {
-                0
-            };
+            let human_rate = (human_fails * 100).checked_div(human_total).unwrap_or(0);
             let _ = writeln!(
                 out,
                 "    Agents: {agent_rate}% fail rate — Humans: {human_rate}% fail rate"
@@ -1650,7 +1644,7 @@ fn format_build_test_lint(entries: &[crate::models::Entry], out: &mut String) {
         }
     }
     let mut sorted: Vec<_> = counts.into_iter().collect();
-    sorted.sort_by(|a, b| (b.1).0.cmp(&(a.1).0));
+    sorted.sort_by_key(|b| std::cmp::Reverse((b.1).0));
 
     let _ = writeln!(out, "  Build/test/lint commands:");
     for (cmd, (total, success)) in sorted.iter().take(5) {
@@ -1696,7 +1690,7 @@ fn handle_project_context(repo: &Repository, args: &Value) -> Result<String, Str
         *cmd_counts.entry(program).or_default() += 1;
     }
     let mut top_cmds: Vec<_> = cmd_counts.into_iter().collect();
-    top_cmds.sort_by(|a, b| b.1.cmp(&a.1));
+    top_cmds.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_cmds.truncate(10);
 
     let _ = writeln!(out, "  Common commands:");

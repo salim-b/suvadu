@@ -109,10 +109,8 @@ impl SearchApp {
         }
 
         match key.code {
-            KeyCode::Left => {
-                if self.pagination.page > 1 {
-                    return SearchAction::SetPage(self.pagination.page - 1);
-                }
+            KeyCode::Left if self.pagination.page > 1 => {
+                return SearchAction::SetPage(self.pagination.page - 1);
             }
             KeyCode::Right => {
                 let total_pages = self
@@ -192,21 +190,15 @@ impl SearchApp {
                 }
             }
             // Half-page scroll
-            KeyCode::Char('G') => {
-                if !self.entries.is_empty() {
-                    self.table_state.select(Some(self.entries.len() - 1));
-                }
+            KeyCode::Char('G') if !self.entries.is_empty() => {
+                self.table_state.select(Some(self.entries.len() - 1));
             }
-            KeyCode::Char('g') => {
-                if !self.entries.is_empty() {
-                    self.table_state.select(Some(0));
-                }
+            KeyCode::Char('g') if !self.entries.is_empty() => {
+                self.table_state.select(Some(0));
             }
             // Page navigation
-            KeyCode::Left | KeyCode::Char('h') => {
-                if self.pagination.page > 1 {
-                    return SearchAction::SetPage(self.pagination.page - 1);
-                }
+            KeyCode::Left | KeyCode::Char('h') if self.pagination.page > 1 => {
+                return SearchAction::SetPage(self.pagination.page - 1);
             }
             KeyCode::Right | KeyCode::Char('l') => {
                 let total_pages = self

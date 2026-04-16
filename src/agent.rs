@@ -316,7 +316,7 @@ fn print_report_agent_breakdown(agents_sorted: &[(&String, &usize)], total: usiz
             )]
             let bar_len = (**count as f64 / max_count as f64 * 24.0) as usize;
             let bar: String = "█".repeat(bar_len);
-            println!("  {name:<13} {green}{bar:<24}{r}  {count:>4}  ({pct:>4.1}%)",);
+            println!("  {name:<13} {green}{bar:<24}{r}  {count:>4}  ({pct:>4.1}%)");
         }
         println!();
     }
@@ -594,7 +594,7 @@ fn print_stats_top_dirs(agent: &str, cmds: &[&Entry], home: &str) {
         *dir_counts.entry(e.cwd.clone()).or_default() += 1;
     }
     let mut top_dirs: Vec<_> = dir_counts.into_iter().collect();
-    top_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+    top_dirs.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     println!("  Top Directories ({agent})");
     println!("  {}", "─".repeat(30));
@@ -618,7 +618,7 @@ fn print_stats_high_risk_cmds(agent: &str, cmds: &[&Entry], home: &str, c: bool)
             })
         })
         .collect();
-    high_risk_cmds.sort_by(|a, b| b.0.started_at.cmp(&a.0.started_at));
+    high_risk_cmds.sort_by_key(|b| std::cmp::Reverse(b.0.started_at));
     high_risk_cmds.truncate(20);
 
     if !high_risk_cmds.is_empty() {

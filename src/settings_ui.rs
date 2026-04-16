@@ -368,71 +368,72 @@ impl AppState {
                 self.agent_executor_type_index = 0;
                 self.agent_focus = 0;
             }
-            KeyCode::Char('d') if self.current_tab == SettingsTab::Exclusions => {
-                if !self.config.exclusions.is_empty() {
-                    self.config.exclusions.remove(self.selected_item);
-                    self.dirty = true;
-                    if self.selected_item >= self.config.exclusions.len()
-                        && !self.config.exclusions.is_empty()
-                    {
-                        self.selected_item = self.config.exclusions.len() - 1;
-                    } else if self.config.exclusions.is_empty() {
-                        self.selected_item = 0;
-                    }
-                    self.exclusion_list_state
-                        .select(if self.config.exclusions.is_empty() {
-                            None
-                        } else {
-                            Some(self.selected_item)
-                        });
+            KeyCode::Char('d')
+                if self.current_tab == SettingsTab::Exclusions
+                    && !self.config.exclusions.is_empty() =>
+            {
+                self.config.exclusions.remove(self.selected_item);
+                self.dirty = true;
+                if self.selected_item >= self.config.exclusions.len()
+                    && !self.config.exclusions.is_empty()
+                {
+                    self.selected_item = self.config.exclusions.len() - 1;
+                } else if self.config.exclusions.is_empty() {
+                    self.selected_item = 0;
                 }
+                self.exclusion_list_state
+                    .select(if self.config.exclusions.is_empty() {
+                        None
+                    } else {
+                        Some(self.selected_item)
+                    });
             }
-            KeyCode::Char('d') if self.current_tab == SettingsTab::AutoTags => {
-                if !self.config.auto_tags.is_empty() {
-                    self.dirty = true;
-                    let mut auto_tags: Vec<_> = self.config.auto_tags.keys().cloned().collect();
-                    auto_tags.sort();
-                    if let Some(key) = auto_tags.get(self.selected_item) {
-                        self.config.auto_tags.remove(key);
-                    }
+            KeyCode::Char('d')
+                if self.current_tab == SettingsTab::AutoTags
+                    && !self.config.auto_tags.is_empty() =>
+            {
+                self.dirty = true;
+                let mut auto_tags: Vec<_> = self.config.auto_tags.keys().cloned().collect();
+                auto_tags.sort();
+                if let Some(key) = auto_tags.get(self.selected_item) {
+                    self.config.auto_tags.remove(key);
+                }
 
-                    if self.selected_item >= self.config.auto_tags.len()
-                        && !self.config.auto_tags.is_empty()
-                    {
-                        self.selected_item = self.config.auto_tags.len() - 1;
-                    } else if self.config.auto_tags.is_empty() {
-                        self.selected_item = 0;
-                    }
-                    self.auto_tag_list_state
-                        .select(if self.config.auto_tags.is_empty() {
-                            None
-                        } else {
-                            Some(self.selected_item)
-                        });
+                if self.selected_item >= self.config.auto_tags.len()
+                    && !self.config.auto_tags.is_empty()
+                {
+                    self.selected_item = self.config.auto_tags.len() - 1;
+                } else if self.config.auto_tags.is_empty() {
+                    self.selected_item = 0;
                 }
+                self.auto_tag_list_state
+                    .select(if self.config.auto_tags.is_empty() {
+                        None
+                    } else {
+                        Some(self.selected_item)
+                    });
             }
-            KeyCode::Char('d') if self.current_tab == SettingsTab::Agents => {
-                if !self.config.agents.is_empty() {
-                    self.dirty = true;
-                    let mut agent_keys: Vec<_> = self.config.agents.keys().cloned().collect();
-                    agent_keys.sort();
-                    if let Some(key) = agent_keys.get(self.selected_item) {
-                        self.config.agents.remove(key);
-                    }
-                    if self.selected_item >= self.config.agents.len()
-                        && !self.config.agents.is_empty()
-                    {
-                        self.selected_item = self.config.agents.len() - 1;
-                    } else if self.config.agents.is_empty() {
-                        self.selected_item = 0;
-                    }
-                    self.agent_list_state
-                        .select(if self.config.agents.is_empty() {
-                            None
-                        } else {
-                            Some(self.selected_item)
-                        });
+            KeyCode::Char('d')
+                if self.current_tab == SettingsTab::Agents && !self.config.agents.is_empty() =>
+            {
+                self.dirty = true;
+                let mut agent_keys: Vec<_> = self.config.agents.keys().cloned().collect();
+                agent_keys.sort();
+                if let Some(key) = agent_keys.get(self.selected_item) {
+                    self.config.agents.remove(key);
                 }
+                if self.selected_item >= self.config.agents.len() && !self.config.agents.is_empty()
+                {
+                    self.selected_item = self.config.agents.len() - 1;
+                } else if self.config.agents.is_empty() {
+                    self.selected_item = 0;
+                }
+                self.agent_list_state
+                    .select(if self.config.agents.is_empty() {
+                        None
+                    } else {
+                        Some(self.selected_item)
+                    });
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 // Enter/Space toggles bools or enters edit mode for numbers/text

@@ -247,7 +247,7 @@ impl SearchApp {
             let timeout = if self.status_message.is_some() {
                 std::time::Duration::from_secs(2)
             } else {
-                std::time::Duration::from_secs(60)
+                std::time::Duration::from_mins(1)
             };
             if !event::poll(timeout)? {
                 continue;
@@ -262,10 +262,8 @@ impl SearchApp {
                         other => self.dispatch_action(other, repo)?,
                     }
                 }
-                Event::Paste(text) => {
-                    if self.handle_paste(&text) {
-                        self.reload_entries(repo)?;
-                    }
+                Event::Paste(text) if self.handle_paste(&text) => {
+                    self.reload_entries(repo)?;
                 }
                 _ => {}
             }

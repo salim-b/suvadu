@@ -118,7 +118,7 @@ pub fn compute_agent_counts(entries: &[Entry]) -> Vec<(String, usize)> {
         *counts.entry(name.to_string()).or_default() += 1;
     }
     let mut sorted: Vec<_> = counts.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
     sorted
 }
 

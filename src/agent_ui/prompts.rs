@@ -156,7 +156,7 @@ fn build_prompt_groups(entries: &[Entry]) -> Vec<PromptGroup> {
 
     let mut groups: Vec<PromptGroup> = map.into_values().map(PromptGroupBuilder::finish).collect();
     // Most recent first
-    groups.sort_by(|a, b| b.last_at.cmp(&a.last_at));
+    groups.sort_by_key(|b| std::cmp::Reverse(b.last_at));
     groups
 }
 
@@ -296,29 +296,21 @@ impl<'a> PromptExplorerApp<'a> {
                     self.list_table.select(Some(cur.saturating_add(1).min(max)));
                 }
             }
-            KeyCode::Home => {
-                if !self.list_page_slice().is_empty() {
-                    self.list_table.select(Some(0));
-                }
+            KeyCode::Home if !self.list_page_slice().is_empty() => {
+                self.list_table.select(Some(0));
             }
-            KeyCode::End => {
-                if !self.list_page_slice().is_empty() {
-                    self.list_table
-                        .select(Some(self.list_page_slice().len().saturating_sub(1)));
-                }
+            KeyCode::End if !self.list_page_slice().is_empty() => {
+                self.list_table
+                    .select(Some(self.list_page_slice().len().saturating_sub(1)));
             }
             // Page navigation
-            KeyCode::Left => {
-                if self.list_page > 1 {
-                    self.list_page -= 1;
-                    self.list_table.select(Some(0));
-                }
+            KeyCode::Left if self.list_page > 1 => {
+                self.list_page -= 1;
+                self.list_table.select(Some(0));
             }
-            KeyCode::Right => {
-                if self.list_page < self.list_total_pages() {
-                    self.list_page += 1;
-                    self.list_table.select(Some(0));
-                }
+            KeyCode::Right if self.list_page < self.list_total_pages() => {
+                self.list_page += 1;
+                self.list_table.select(Some(0));
             }
             // Drill into detail
             KeyCode::Enter => {
@@ -378,29 +370,21 @@ impl<'a> PromptExplorerApp<'a> {
                         .select(Some(cur.saturating_add(1).min(max)));
                 }
             }
-            KeyCode::Home => {
-                if !self.detail_page_slice().is_empty() {
-                    self.detail_table.select(Some(0));
-                }
+            KeyCode::Home if !self.detail_page_slice().is_empty() => {
+                self.detail_table.select(Some(0));
             }
-            KeyCode::End => {
-                if !self.detail_page_slice().is_empty() {
-                    self.detail_table
-                        .select(Some(self.detail_page_slice().len().saturating_sub(1)));
-                }
+            KeyCode::End if !self.detail_page_slice().is_empty() => {
+                self.detail_table
+                    .select(Some(self.detail_page_slice().len().saturating_sub(1)));
             }
             // Page navigation
-            KeyCode::Left => {
-                if self.detail_page > 1 {
-                    self.detail_page -= 1;
-                    self.detail_table.select(Some(0));
-                }
+            KeyCode::Left if self.detail_page > 1 => {
+                self.detail_page -= 1;
+                self.detail_table.select(Some(0));
             }
-            KeyCode::Right => {
-                if self.detail_page < self.detail_total_pages() {
-                    self.detail_page += 1;
-                    self.detail_table.select(Some(0));
-                }
+            KeyCode::Right if self.detail_page < self.detail_total_pages() => {
+                self.detail_page += 1;
+                self.detail_table.select(Some(0));
             }
             // Detail pane toggle
             KeyCode::Tab => {
@@ -1142,7 +1126,7 @@ where
         let timeout = if app.status_message.is_some() {
             std::time::Duration::from_secs(2)
         } else {
-            std::time::Duration::from_secs(60)
+            std::time::Duration::from_mins(1)
         };
         if !event::poll(timeout)? {
             continue;
