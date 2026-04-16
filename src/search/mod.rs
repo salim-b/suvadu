@@ -252,8 +252,8 @@ impl SearchApp {
             if !event::poll(timeout)? {
                 continue;
             }
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
                     match self.handle_input(key) {
                         SearchAction::Select(cmd) => return Ok(Some(cmd)),
                         SearchAction::Exit => return Ok(None),
@@ -262,6 +262,12 @@ impl SearchApp {
                         other => self.dispatch_action(other, repo)?,
                     }
                 }
+                Event::Paste(text) => {
+                    if self.handle_paste(&text) {
+                        self.reload_entries(repo)?;
+                    }
+                }
+                _ => {}
             }
         }
     }

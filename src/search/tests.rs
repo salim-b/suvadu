@@ -1882,3 +1882,220 @@ fn test_vim_mode_roundtrip() {
     app.handle_input(KeyEvent::from(KeyCode::Char('i')));
     assert_eq!(app.vim_mode, VimMode::Insert);
 }
+
+// ========================================================================
+// Paste handling tests
+// ========================================================================
+
+#[test]
+fn test_paste_into_empty_query() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    assert!(app.query.is_empty());
+
+    let needs_reload = app.handle_paste("hello world");
+    assert!(needs_reload);
+    assert_eq!(app.query, "hello world");
+}
+
+#[test]
+fn test_paste_appends_to_existing_query() {
+    let mut cfg = test_search_config(vec![create_test_entry("ls")], 1);
+    cfg.initial_query = Some("git ".to_string());
+    let mut app = SearchApp::new(cfg);
+
+    let needs_reload = app.handle_paste("status");
+    assert!(needs_reload);
+    assert_eq!(app.query, "git status");
+}
+
+#[test]
+fn test_paste_strips_control_characters() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+
+    // Paste text with newlines, tabs, and other control chars
+    let needs_reload = app.handle_paste("hello\nworld\t!\x00\x07");
+    assert!(needs_reload);
+    assert_eq!(app.query, "helloworld!");
+}
+
+#[test]
+fn test_paste_preserves_spaces() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+
+    let needs_reload = app.handle_paste("cargo build --release");
+    assert!(needs_reload);
+    assert_eq!(app.query, "cargo build --release");
+}
+
+#[test]
+fn test_paste_respects_max_input_len() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+
+    // Paste a very long string
+    let long_string: String = "a".repeat(3000);
+    let needs_reload = app.handle_paste(&long_string);
+    assert!(needs_reload);
+    assert_eq!(app.query.len(), 2000); // MAX_INPUT_LEN
+}
+
+#[test]
+fn test_paste_respects_remaining_capacity() {
+    let mut cfg = test_search_config(vec![create_test_entry("ls")], 1);
+    cfg.initial_query = Some("x".repeat(1995));
+    let mut app = SearchApp::new(cfg);
+
+    let needs_reload = app.handle_paste("abcdefghij"); // 10 chars, only 5 fit
+    assert!(needs_reload);
+    assert_eq!(app.query.len(), 2000);
+    assert!(app.query.ends_with("abcde"));
+}
+
+#[test]
+fn test_paste_empty_string() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+
+    let needs_reload = app.handle_paste("");
+    assert!(!needs_reload);
+    assert!(app.query.is_empty());
+}
+
+#[test]
+fn test_paste_only_control_chars() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+
+    let needs_reload = app.handle_paste("\n\r\t\x00\x07");
+    assert!(!needs_reload);
+    assert!(app.query.is_empty());
+}
+
+#[test]
+fn test_paste_in_vim_normal_mode_switches_to_insert() {
+    let mut app = SearchApp::new(test_vim_config(vec![create_test_entry("ls")], 1));
+    app.vim_mode = VimMode::Normal;
+
+    let needs_reload = app.handle_paste("search term");
+    assert!(needs_reload);
+    assert_eq!(app.vim_mode, VimMode::Insert);
+    assert_eq!(app.query, "search term");
+}
+
+#[test]
+fn test_paste_into_note_dialog() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Note {
+        entry_id: 10,
+        input: "existing ".to_string(),
+    };
+
+    let needs_reload = app.handle_paste("note text");
+    assert!(!needs_reload); // Note paste doesn't trigger query reload
+    if let DialogState::Note { ref input, .. } = app.dialog {
+        assert_eq!(input, "existing note text");
+    } else {
+        panic!("Expected Note dialog");
+    }
+}
+
+#[test]
+fn test_paste_into_goto_dialog_digits_only() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::GoToPage {
+        input: String::new(),
+    };
+
+    let needs_reload = app.handle_paste("page 42!");
+    assert!(!needs_reload);
+    if let DialogState::GoToPage { ref input } = app.dialog {
+        assert_eq!(input, "42"); // Only digits kept
+    } else {
+        panic!("Expected GoToPage dialog");
+    }
+}
+
+#[test]
+fn test_paste_into_filter_start_date() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Filter;
+    app.filters.focus_index = 0;
+    app.filters.start_date_input.clear();
+
+    let needs_reload = app.handle_paste("2026-04-01");
+    assert!(!needs_reload);
+    assert_eq!(app.filters.start_date_input, "2026-04-01");
+}
+
+#[test]
+fn test_paste_into_filter_end_date() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Filter;
+    app.filters.focus_index = 1;
+    app.filters.end_date_input.clear();
+
+    let needs_reload = app.handle_paste("2026-04-16");
+    assert!(!needs_reload);
+    assert_eq!(app.filters.end_date_input, "2026-04-16");
+}
+
+#[test]
+fn test_paste_into_filter_tag() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Filter;
+    app.filters.focus_index = 2;
+
+    let needs_reload = app.handle_paste("deploy");
+    assert!(!needs_reload);
+    assert!(app.filters.tag_filter_input.contains("deploy"));
+}
+
+#[test]
+fn test_paste_into_filter_exit_code() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Filter;
+    app.filters.focus_index = 3;
+    app.filters.exit_code_input.clear();
+
+    let needs_reload = app.handle_paste("127");
+    assert!(!needs_reload);
+    assert_eq!(app.filters.exit_code_input, "127");
+}
+
+#[test]
+fn test_paste_into_filter_executor_selector_ignored() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Filter;
+    app.filters.focus_index = 4; // executor selector
+    app.filters.executor_sel = 0;
+
+    let needs_reload = app.handle_paste("agent");
+    assert!(!needs_reload);
+    assert_eq!(app.filters.executor_sel, 0); // unchanged
+}
+
+#[test]
+fn test_paste_in_help_dialog_ignored() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Help;
+
+    let needs_reload = app.handle_paste("anything");
+    assert!(!needs_reload);
+    assert!(app.query.is_empty());
+}
+
+#[test]
+fn test_paste_in_delete_dialog_ignored() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+    app.dialog = DialogState::Delete { entry_id: 1 };
+
+    let needs_reload = app.handle_paste("anything");
+    assert!(!needs_reload);
+    assert!(app.query.is_empty());
+}
+
+#[test]
+fn test_paste_unicode() {
+    let mut app = SearchApp::new(test_search_config(vec![create_test_entry("ls")], 1));
+
+    let needs_reload = app.handle_paste("git log --author=\"\u{00e9}mile\"");
+    assert!(needs_reload);
+    assert_eq!(app.query, "git log --author=\"\u{00e9}mile\"");
+}

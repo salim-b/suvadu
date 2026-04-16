@@ -55,10 +55,14 @@ impl Drop for TerminalGuard {
 pub struct TerminalGuardStderr;
 
 impl TerminalGuardStderr {
-    /// Enter raw mode + alternate screen on stderr.
+    /// Enter raw mode + alternate screen + bracketed paste on stderr.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
+        crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableBracketedPaste
+        )?;
         Ok(Self)
     }
 }
@@ -66,7 +70,11 @@ impl TerminalGuardStderr {
 impl Drop for TerminalGuardStderr {
     fn drop(&mut self) {
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen);
+        let _ = crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableBracketedPaste
+        );
     }
 }
 

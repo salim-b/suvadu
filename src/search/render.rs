@@ -1192,6 +1192,7 @@ fn build_help_lines(t: &crate::theme::Theme) -> Vec<Line<'static>> {
         Line::from(""),
         help_section("\u{2500}\u{2500} Actions \u{2500}\u{2500}", t),
         help_row("  Enter           ", "Select command", t),
+        help_row("  Paste           ", "Paste from clipboard", t),
         help_row("  ^Y              ", "Copy command to clipboard", t),
         help_row("  ^D              ", "Delete entry", t),
         help_row("  ^B              ", "Toggle bookmark", t),

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Paste support in search TUI** — `Cmd+V` / `Ctrl+V` now works in the search pane and all dialog inputs (filter, note, go-to-page). Pasted text is sanitized (control characters stripped), respects the 2000-character input limit, and routes to the active input field. In vim Normal mode, paste auto-switches to Insert mode. Closes #18.
+
 ## [0.3.1] - 2026-04-05
 
 ### Added

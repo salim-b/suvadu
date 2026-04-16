@@ -7,6 +7,62 @@ use crate::util;
 const MAX_INPUT_LEN: usize = 2000;
 
 impl SearchApp {
+    /// Handle a bracketed-paste event. Returns `true` if the paste modified
+    /// the main search query (caller should reload), `false` otherwise.
+    pub(super) fn handle_paste(&mut self, text: &str) -> bool {
+        // Strip control characters (keep printable + whitespace except newlines)
+        let sanitized: String = text
+            .chars()
+            .filter(|c| !c.is_control() || *c == ' ')
+            .collect();
+
+        if sanitized.is_empty() {
+            return false;
+        }
+
+        match self.dialog {
+            DialogState::Note { ref mut input, .. } => {
+                let remaining = MAX_INPUT_LEN.saturating_sub(input.len());
+                input.extend(sanitized.chars().take(remaining));
+                false
+            }
+            DialogState::GoToPage { ref mut input } => {
+                // Only accept digits
+                let digits: String = sanitized.chars().filter(char::is_ascii_digit).collect();
+                let remaining = MAX_INPUT_LEN.saturating_sub(input.len());
+                input.extend(digits.chars().take(remaining));
+                false
+            }
+            DialogState::Filter => {
+                self.paste_into_filter_field(&sanitized);
+                false
+            }
+            DialogState::Help | DialogState::Delete { .. } | DialogState::TagAssociation => false,
+            DialogState::None => {
+                // In vim Normal mode, auto-switch to Insert mode on paste
+                if self.vim_enabled && self.vim_mode == VimMode::Normal {
+                    self.vim_mode = VimMode::Insert;
+                }
+                let remaining = MAX_INPUT_LEN.saturating_sub(self.query.len());
+                self.query.extend(sanitized.chars().take(remaining));
+                true
+            }
+        }
+    }
+
+    /// Paste sanitized text into the currently focused filter field.
+    fn paste_into_filter_field(&mut self, text: &str) {
+        let target = match self.filters.focus_index {
+            0 => &mut self.filters.start_date_input,
+            1 => &mut self.filters.end_date_input,
+            2 => &mut self.filters.tag_filter_input,
+            3 => &mut self.filters.exit_code_input,
+            _ => return, // field 4 is a selector, no text paste
+        };
+        let remaining = MAX_INPUT_LEN.saturating_sub(target.len());
+        target.extend(text.chars().take(remaining));
+    }
+
     pub(super) fn handle_input(&mut self, key: KeyEvent) -> SearchAction {
         match self.dialog {
             DialogState::Delete { .. } => return self.handle_delete_dialog_input(key),
