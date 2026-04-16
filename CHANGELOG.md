@@ -7,6 +7,10 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Paste support in search TUI** — `Cmd+V` / `Ctrl+V` now works in the search pane and all dialog inputs (filter, note, go-to-page). Pasted text is sanitized (control characters stripped), respects the 2000-character input limit, and routes to the active input field. In vim Normal mode, paste auto-switches to Insert mode. Closes #18.
 
+### Fixed
+- **Reduced false positives in secret redaction** — Environment variables like `AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `TOKENIZERS_PARALLELISM`, `PASSWORD_FILE`, `CREDENTIAL_HELPER`, `SECRET_SCANNING`, and `REACT_APP_AUTH_DOMAIN` are no longer incorrectly redacted. The redaction engine now requires sensitive keywords (`SECRET`, `TOKEN`, `PASSWORD`, `AUTH`, etc.) to appear as the **final segment** of the variable name rather than matching as arbitrary substrings. Real secrets like `GITHUB_TOKEN=`, `DB_PASSWORD=`, `API_KEY=` are still correctly redacted. Closes #16.
+- **Bash octal parsing error** — Fixed `value too great for base` crash in bash hooks when `EPOCHREALTIME` milliseconds had a leading zero (e.g., `068`). Added `10#` prefix to force base-10 evaluation. #17.
+
 ## [0.3.1] - 2026-04-05
 
 ### Added

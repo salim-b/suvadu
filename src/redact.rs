@@ -60,12 +60,18 @@ fn build_patterns() -> Vec<SecretPattern> {
         .collect()
 }
 
-/// Environment variable assignments with sensitive names
+/// Environment variable assignments with sensitive names.
+///
+/// The keyword must appear as the **final segment** of the variable name
+/// (delimited by underscores) so that names like `AUTHOR_NAME`,
+/// `TOKENIZERS_PARALLELISM`, or `PASSWORD_FILE` are not false-positived.
+///
 /// Captures: group(1) = `VAR_NAME=`, group(2) = the secret value
 fn env_var_patterns() -> Vec<&'static str> {
     vec![
-        // export SECRET_KEY=value or SECRET_KEY=value (inline)
-        r"(?i)((?:export\s+)?(?:\w*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|API_SECRET|ACCESS_KEY|PRIVATE_KEY|AUTH|CREDENTIAL)\w*)=)(\S+)",
+        // Matches: GITHUB_TOKEN=, MY_SECRET=, DB_PASSWORD=, export AUTH=, AWS_SECRET_ACCESS_KEY=, etc.
+        // Rejects: AUTHOR_NAME=, TOKEN_BUCKET_SIZE=, SECRET_SCANNING=, PASSWORD_FILE=, etc.
+        r"(?i)((?:export\s+)?(?:\w+_)?(?:SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH|(?:API|ACCESS|PRIVATE|SECRET)_KEY)=)(\S+)",
     ]
 }
 
@@ -368,5 +374,165 @@ mod tests {
         let cmd = "ls";
         let redacted = redact_secrets(cmd);
         assert_eq!(redacted, "ls");
+    }
+
+    // ── False positive regression tests (issue #16) ──
+
+    #[test]
+    fn test_no_false_positive_author_name() {
+        let cmd = "AUTHOR_NAME=John git commit";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_git_author_email() {
+        let cmd = "GIT_AUTHOR_EMAIL=me@test.com git commit";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_authentication_mode() {
+        let cmd = "AUTHENTICATION_MODE=oauth2 app start";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_token_bucket_size() {
+        let cmd = "TOKEN_BUCKET_SIZE=100 server start";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_tokenizers_parallelism() {
+        let cmd = "TOKENIZERS_PARALLELISM=false python train.py";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_password_file() {
+        let cmd = "PASSWORD_FILE=/etc/shadow cat";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_credential_helper() {
+        let cmd = "CREDENTIAL_HELPER=store git config";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_private_key_path() {
+        let cmd = "PRIVATE_KEY_PATH=/home/key.pem ssh-keygen";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_react_app_auth_domain() {
+        let cmd = "REACT_APP_AUTH_DOMAIN=auth0.com npm start";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_secret_scanning() {
+        let cmd = "SECRET_SCANNING=enabled lint";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_claude_code_no_flicker() {
+        let cmd = "CLAUDE_CODE_NO_FLICKER=1 claude --allow-dangerously-skip-permissions";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    #[test]
+    fn test_no_false_positive_node_env() {
+        let cmd = "NODE_ENV=production npm start";
+        assert_eq!(redact_secrets(cmd), cmd);
+    }
+
+    // ── True positive tests: env vars that SHOULD be redacted ──
+
+    #[test]
+    fn test_env_var_auth_token() {
+        let cmd = "AUTH_TOKEN=secret123 curl api.com";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "AUTH_TOKEN=***REDACTED*** curl api.com");
+    }
+
+    #[test]
+    fn test_env_var_github_token() {
+        let cmd = "GITHUB_TOKEN=ghp_abc123 gh pr list";
+        let redacted = redact_secrets(cmd);
+        assert!(redacted.contains("GITHUB_TOKEN=***REDACTED***"));
+    }
+
+    #[test]
+    fn test_env_var_db_password() {
+        let cmd = "DB_PASSWORD=pass123 psql";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "DB_PASSWORD=***REDACTED*** psql");
+    }
+
+    #[test]
+    fn test_env_var_api_key() {
+        let cmd = "API_KEY=abc123 curl api.com";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "API_KEY=***REDACTED*** curl api.com");
+    }
+
+    #[test]
+    fn test_env_var_secret_key() {
+        let cmd = "SECRET_KEY=abc123 python app.py";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "SECRET_KEY=***REDACTED*** python app.py");
+    }
+
+    #[test]
+    fn test_env_var_aws_secret_access_key() {
+        let cmd = "AWS_SECRET_ACCESS_KEY=wJalr123 aws s3 ls";
+        let redacted = redact_secrets(cmd);
+        assert!(redacted.contains("AWS_SECRET_ACCESS_KEY=***REDACTED***"));
+    }
+
+    #[test]
+    fn test_env_var_basic_auth() {
+        let cmd = "BASIC_AUTH=user:pass curl api.com";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "BASIC_AUTH=***REDACTED*** curl api.com");
+    }
+
+    #[test]
+    fn test_env_var_bare_secret() {
+        let cmd = "SECRET=mysecret deploy";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "SECRET=***REDACTED*** deploy");
+    }
+
+    #[test]
+    fn test_env_var_bare_token() {
+        let cmd = "TOKEN=abc123 app";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "TOKEN=***REDACTED*** app");
+    }
+
+    #[test]
+    fn test_env_var_export_credential() {
+        let cmd = "export MY_CREDENTIAL=secret123";
+        let redacted = redact_secrets(cmd);
+        assert_eq!(redacted, "export MY_CREDENTIAL=***REDACTED***");
+    }
+
+    #[test]
+    fn test_env_var_private_key() {
+        let cmd = "PRIVATE_KEY=-----BEGIN-RSA sshd";
+        let redacted = redact_secrets(cmd);
+        assert!(redacted.contains("PRIVATE_KEY=***REDACTED***"));
+    }
+
+    #[test]
+    fn test_env_var_anthropic_api_key() {
+        let cmd = "ANTHROPIC_API_KEY=sk-ant-api03-test123 claude";
+        let redacted = redact_secrets(cmd);
+        assert!(redacted.contains("ANTHROPIC_API_KEY=***REDACTED***"));
     }
 }
